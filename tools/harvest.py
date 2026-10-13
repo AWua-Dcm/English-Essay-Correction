@@ -97,6 +97,12 @@ def fetch(url: str, out_path: str, quiet: bool = False):
     return 0
 
 
+# Lone surrogates (U+D800-U+DFFF) are not valid text and cannot be encoded back
+# to UTF-8, so they crash any later write. Malformed source pages do produce
+# them, so strip them at the single point where bytes become text.
+LONE_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
 def decode_html(raw: bytes):
     head = raw[:6000]
     m = re.search(rb'charset\s*=\s*["\']?([\w\-]+)', head, re.I)
@@ -108,10 +114,10 @@ def decode_html(raw: bytes):
         if enc in ("gb2312", "gb-2312"):
             enc = "gb18030"
         try:
-            return raw.decode(enc), enc
+            return LONE_SURROGATE_RE.sub("", raw.decode(enc)), enc
         except (UnicodeDecodeError, LookupError):
             continue
-    return raw.decode("utf-8", "replace"), "utf-8/replace"
+    return LONE_SURROGATE_RE.sub("", raw.decode("utf-8", "replace")), "utf-8/replace"
 
 
 ENTITIES = {
