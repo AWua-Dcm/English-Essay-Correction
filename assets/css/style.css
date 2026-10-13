@@ -209,6 +209,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { border-color
   padding: 10px 12px; margin: 10px 0; font-size: 14px; color: #6b5a20;
 }
 .warn-bar p { margin: 0 0 8px; }
+/* 识别成功的提示用中性色，避免和"警告"抢注意力 */
+.warn-bar.info { background: #f2f6f3; border-color: #cfe0d3; color: #34503c; }
+
+.ocr-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
+.ocr-row .hint { margin: 0; }
 
 /* ---------- 报告区（批改稿） ---------- */
 #report-area { margin-top: 22px; }

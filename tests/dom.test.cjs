@@ -446,3 +446,52 @@ test('使用说明：关闭后可一键再次展开（有 Key 时也可）', asy
   keyed.click(keyed.$('#help-open'));
   assert.ok(!keyed.$('#first-run-card').hidden, '有 Key 时也可手动展开使用说明');
 });
+
+/* ---------- 本地 OCR（免 Key 识图） ---------- */
+
+test('OCR：模块已接入页面且接口完整', async () => {
+  const { window } = await loadApp({});
+  assert.ok(window.EEC.ocr, 'EEC.ocr 未挂载（ocr.js 加载顺序或路径有问题）');
+  for (const k of ['isSupported', 'recognize', 'cleanText', 'gradeConfidence', 'advice']) {
+    assert.strictEqual(typeof window.EEC.ocr[k], 'function', `缺少 ${k}`);
+  }
+});
+
+test('OCR：无图片时不展示识别入口，注记默认隐藏', async () => {
+  const { $ } = await loadApp({});
+  assert.ok($('#ocr-row'), '缺少 #ocr-row');
+  assert.ok($('#ocr-note'), '缺少 #ocr-note');
+  assert.ok($('#btn-ocr'), '缺少 #btn-ocr');
+  assert.ok($('#ocr-row').hidden, '无图片时应隐藏识别入口');
+  assert.ok($('#ocr-note').hidden, '注记默认应隐藏');
+  assert.ok($('#ocr-note-text'), '缺少 #ocr-note-text');
+});
+
+test('OCR：无图片直接点击 → 提示先添加图片，不发起识别', async () => {
+  const { $, click, window } = await loadApp({});
+  click($('#btn-ocr'));
+  await new Promise(r => setTimeout(r, 0));
+  assert.match($('#toast').textContent, /请先添加图片/);
+  assert.ok(!window.EEC.app.state.ocrBusy, '不应进入识别中状态');
+});
+
+test('OCR：不支持时给出替代路径而不是静默失败', async () => {
+  const { $, click, window } = await loadApp({});
+  // 模拟老旧浏览器：无 WASM SIMD
+  window.EEC.ocr.hasSimd = () => false;
+  window.EEC.ocr.isSupported = () => false;
+  window.EEC.app.state.images.push({ dataUrl: 'data:image/jpeg;base64,AAAA', name: 't.jpg' });
+  click($('#btn-ocr'));
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(!$('#ocr-note').hidden, '不支持时必须给出可见说明');
+  const t = $('#ocr-note-text').textContent;
+  assert.ok(t.includes('不支持'), '应说明不支持');
+  assert.ok(t.includes('图片识别') || t.includes('粘贴'), '应给出替代路径');
+});
+
+test('OCR：警示卡按钮齐备（改用视觉模型 / 改用复制模式）', async () => {
+  const { $, $all } = await loadApp({});
+  const btns = $all('#ocr-note button').map(b => b.textContent);
+  assert.ok(btns.some(x => x.includes('视觉模型')), '缺少改用视觉模型');
+  assert.ok(btns.some(x => x.includes('复制模式')), '缺少改用复制模式');
+});

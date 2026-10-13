@@ -17,7 +17,10 @@ test('脚本加载顺序', () => {
   const order = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src').split('?')[0]);
   assert.deepStrictEqual(order, [
     'assets/js/util.js', 'assets/js/render.js', 'assets/js/providers.js', 'assets/js/prompt.js',
-    'assets/js/api.js', 'assets/js/store.js', 'assets/js/exporter.js', 'assets/js/demo.js', 'assets/js/app.js',
+    'assets/js/api.js', 'assets/js/store.js', 'assets/js/exporter.js',
+    // ocr.js 只是薄壳（引擎约 6.7MB 在首次点击识别时才懒加载），
+    // 但必须排在 app.js 之前，app.js 启动时会读取 EEC.ocr
+    'assets/js/ocr.js', 'assets/js/demo.js', 'assets/js/app.js',
   ]);
 });
 

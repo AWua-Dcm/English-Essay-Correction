@@ -146,6 +146,105 @@
       div.appendChild(del);
       box.appendChild(div);
     });
+    syncOcrRow();
+  }
+
+  /* ---------- 本地 OCR（免 Key，不上传） ---------- */
+
+  /** 「识别图片文字」只在有图且浏览器支持时出现 */
+  function syncOcrRow() {
+    var row = $('#ocr-row');
+    if (!row) return;
+    var supported = !!(root.EEC && root.EEC.ocr && root.EEC.ocr.isSupported());
+    row.hidden = state.images.length === 0 || !supported;
+    var btn = $('#btn-ocr');
+    if (btn) {
+      btn.disabled = state.ocrBusy === true;
+      btn.textContent = state.ocrBusy ? '识别中…' : '识别图片文字（本地，免 Key）';
+    }
+  }
+
+  function setOcrStatus(msg) {
+    var el = $('#ocr-status');
+    if (el) el.textContent = msg || '';
+  }
+
+  function showOcrNote(msg, isWarn) {
+    var box = $('#ocr-note');
+    var txt = $('#ocr-note-text');
+    if (!box || !txt) return;
+    txt.textContent = msg;
+    box.hidden = !msg;
+    box.className = isWarn ? 'warn-bar' : 'warn-bar info';
+  }
+
+  /**
+   * 依次识别所有已选图片，把文字填进正文框。
+   * 刻意「只填不改」：不自动开始批改，也不做任何拼写纠正——
+   * 识别错误必须由用户过目，否则会被当成学生作文里的错误扣分。
+   */
+  function runOcr() {
+    if (state.ocrBusy) return;
+    var ocr = root.EEC && root.EEC.ocr;
+    if (!state.images.length) { toast('请先添加图片'); return; }
+    if (!ocr || !ocr.isSupported()) {
+      showOcrNote('当前浏览器不支持本地文字识别（缺少 WebAssembly SIMD）。' +
+        '请改用支持图片识别的模型，或把作文粘贴成文字。', true);
+      return;
+    }
+    state.ocrBusy = true;
+    syncOcrRow();
+    var texts = [];
+    var lowest = 100;
+    var grade = 'unknown';
+    setOcrStatus('正在加载识别组件（首次约 6MB，之后走浏览器缓存）…');
+
+    var chain = Promise.resolve();
+    state.images.forEach(function (img, i) {
+      chain = chain.then(function () {
+        setOcrStatus('正在识别第 ' + (i + 1) + '/' + state.images.length + ' 张…');
+        return ocr.recognize(img.dataUrl, function (m) {
+          if (m && m.status === 'recognizing text' && typeof m.progress === 'number') {
+            setOcrStatus('识别中 ' + Math.round(m.progress * 100) + '%（第 ' + (i + 1) + ' 张）');
+          }
+        }).then(function (r) {
+          if (r.text) texts.push(r.text);
+          if (typeof r.confidence === 'number') lowest = Math.min(lowest, r.confidence);
+          if (r.grade && r.grade !== 'good') grade = r.grade;
+          else if (r.grade === 'good' && grade === 'unknown') grade = 'good';
+        });
+      });
+    });
+
+    chain.then(function () {
+      var out = texts.join('\n\n').trim();
+      if (!out) {
+        setOcrStatus('');
+        showOcrNote('没有从图片里识别出文字。请确认照片里的作文清晰可辨；' +
+          '如果是手写内容，本地识别很可能读不出来，建议改用支持图片识别的模型。', true);
+        return;
+      }
+      var ta = $('#essay-text');
+      if (ta) {
+        var existing = ta.value.trim();
+        ta.value = existing ? (existing + '\n\n' + out) : out;
+        state.text = ta.value;
+        updateWordBadge();   // 内部会调用 updateActions()，同步主按钮与清除按钮可用性
+        saveDraftSoon();
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      var conf = lowest === 100 ? null : lowest;
+      setOcrStatus('');
+      showOcrNote('识别置信度 ' + (conf == null ? '未知' : conf + '%') + '。' + ocr.advice(grade),
+        grade !== 'good');
+      announce('图片文字识别完成，请核对后再批改');
+    }).catch(function (err) {
+      setOcrStatus('');
+      showOcrNote('识别失败：' + ((err && err.message) || '未知错误'), true);
+    }).then(function () {
+      state.ocrBusy = false;
+      syncOcrRow();
+    });
   }
 
   function compressImage(file) {
@@ -1073,6 +1172,15 @@
     $('#btn-vision-copy').addEventListener('click', function () {
       openCopyPanel();
       toast('已切换到复制模式：复制指令后，把作文照片直接发到 AI 对话里。');
+    });
+    var btnOcr = $('#btn-ocr');
+    if (btnOcr) btnOcr.addEventListener('click', runOcr);
+    var btnOcrVision = $('#btn-ocr-vision');
+    if (btnOcrVision) btnOcrVision.addEventListener('click', function () { openSettings(); });
+    var btnOcrCopy = $('#btn-ocr-copy');
+    if (btnOcrCopy) btnOcrCopy.addEventListener('click', function () {
+      openCopyPanel();
+      toast('已切换到复制模式：复制指令后，把作文照片直接发到 AI 对话里（推荐支持看图的 Kimi / 豆包 / 通义）。');
     });
     $('#btn-render-anyway').addEventListener('click', function () {
       doPasteRender($('#paste-box').value);

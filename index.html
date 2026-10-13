@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>四六级作文 AI 批改台 · 严格对照官方评分标准</title>
-<link rel="icon" href="assets/img/favicon.svg?v=20261013-3">
-<link rel="stylesheet" href="assets/css/style.css?v=20261013-3">
+<link rel="icon" href="assets/img/favicon.svg?v=20261013-4">
+<link rel="stylesheet" href="assets/css/style.css?v=20261013-4">
 </head>
 <body>
 
@@ -76,8 +76,20 @@
           <input id="image-input-gallery" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple>
         </div>
       </div>
-      <p class="hint">图片识别需要所选模型支持视觉；最多 3 张，会自动压缩。</p>
+      <p class="hint">图片识别需要所选模型支持视觉；最多 3 张，会自动压缩。也可以点下方「识别图片文字」，在本地把图片转成文字（免 Key、不上传）。</p>
       <div id="image-thumbs" class="thumbs" aria-label="已选择的图片"></div>
+
+      <div id="ocr-row" class="ocr-row" hidden>
+        <button id="btn-ocr" class="btn ghost" type="button">识别图片文字（本地，免 Key）</button>
+        <span id="ocr-status" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <div id="ocr-note" class="warn-bar" hidden>
+        <p id="ocr-note-text"></p>
+        <div class="actions">
+          <button id="btn-ocr-vision" class="btn ghost" type="button">改用视觉模型</button>
+          <button id="btn-ocr-copy" class="btn ghost" type="button">改用复制模式</button>
+        </div>
+      </div>
 
       <div id="vision-warn" class="warn-bar" hidden>
         <p id="vision-warn-text">当前模型不支持图片识别。</p>
@@ -207,14 +219,15 @@
 <div id="toast" class="toast" hidden></div>
 <div id="live-status" class="visually-hidden" aria-live="polite"></div>
 
-<script src="assets/js/util.js?v=20261013-3"></script>
-<script src="assets/js/render.js?v=20261013-3"></script>
-<script src="assets/js/providers.js?v=20261013-3"></script>
-<script src="assets/js/prompt.js?v=20261013-3"></script>
-<script src="assets/js/api.js?v=20261013-3"></script>
-<script src="assets/js/store.js?v=20261013-3"></script>
-<script src="assets/js/exporter.js?v=20261013-3"></script>
-<script src="assets/js/demo.js?v=20261013-3"></script>
-<script src="assets/js/app.js?v=20261013-3"></script>
+<script src="assets/js/util.js?v=20261013-4"></script>
+<script src="assets/js/render.js?v=20261013-4"></script>
+<script src="assets/js/providers.js?v=20261013-4"></script>
+<script src="assets/js/prompt.js?v=20261013-4"></script>
+<script src="assets/js/api.js?v=20261013-4"></script>
+<script src="assets/js/store.js?v=20261013-4"></script>
+<script src="assets/js/exporter.js?v=20261013-4"></script>
+<script src="assets/js/ocr.js?v=20261013-4"></script>
+<script src="assets/js/demo.js?v=20261013-4"></script>
+<script src="assets/js/app.js?v=20261013-4"></script>
 </body>
 </html>
