@@ -215,6 +215,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { border-color
 .ocr-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
 .ocr-row .hint { margin: 0; }
 
+/* 客观预检：只展示确定性事实，因此样式刻意做得克制，不像是"评分结果" */
+.precheck {
+  margin: 10px 0 0; padding: 10px 12px; border: 1px solid #dfe6e1;
+  border-radius: 8px; background: #fafbfa;
+}
+.precheck-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; }
+.precheck-title { font-size: 13px; font-weight: 600; color: var(--ink, #222); }
+.precheck-note { font-size: 12px; color: var(--mute); }
+.precheck-list { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.75; color: #3d4a41; }
+.precheck-list li { margin: 0; }
+.precheck-list .pc-warn { color: #8a5a12; }
+
 /* ---------- 报告区（批改稿） ---------- */
 #report-area { margin-top: 22px; }
 .report-nav {

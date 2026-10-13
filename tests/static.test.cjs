@@ -16,7 +16,9 @@ test('相对路径硬约束', () => {
 test('脚本加载顺序', () => {
   const order = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src').split('?')[0]);
   assert.deepStrictEqual(order, [
-    'assets/js/util.js', 'assets/js/render.js', 'assets/js/providers.js', 'assets/js/prompt.js',
+    'assets/js/util.js',
+    // precheck.js 必须在 prompt.js 之前：prompt 组装指令时会读取 EEC.precheck
+    'assets/js/precheck.js', 'assets/js/render.js', 'assets/js/providers.js', 'assets/js/prompt.js',
     'assets/js/api.js', 'assets/js/store.js', 'assets/js/exporter.js',
     // ocr.js 只是薄壳（引擎约 6.7MB 在首次点击识别时才懒加载），
     // 但必须排在 app.js 之前，app.js 启动时会读取 EEC.ocr

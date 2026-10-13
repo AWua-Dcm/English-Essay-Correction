@@ -13,6 +13,10 @@
     ? require('./util.js')
     : (root.EEC && root.EEC.util);
 
+  var precheck = (typeof module !== 'undefined' && module.exports)
+    ? require('./precheck.js')
+    : (root.EEC && root.EEC.precheck);
+
   /* ===== 附录 A：批改模板正本（system 提示词第一部分，逐字） ===== */
   var TEMPLATE = `你现在是大学英语四六级作文阅卷导师，严格按照大学英语四六级作文官方评分标准工作。请批改我随后提供的作文。
 
@@ -171,9 +175,31 @@
     return '"""\n' + inner + '\n"""';
   }
 
-  /** 自动模式的 user 消息（元信息 + 作文段） */
+  /**
+   * 客观预检区块：把网页能**精确统计**的事实（字数与官方扣分、段数、句长分布、
+   * 套话命中、重复词、句式类别）交给模型，省去它自己数错的可能。
+   *
+   * 只注入事实，不注入分数——规则引擎给不出可信分数（实测 2 分作文被算成 11 分，
+   * 见 docs/on-device-llm-spike.md），所以档位判断始终由模型完成。
+   * 预检失败绝不阻断批改。
+   */
+  function precheckBlock(opts) {
+    var text = String((opts && opts.text) || '');
+    if (!text.trim() || !precheck) return '';
+    try {
+      var out = precheck.format(precheck.analyze(text, opts.level));
+      return out || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /** 自动模式的 user 消息（元信息 + 客观预检 + 作文段） */
   function buildMetaBlock(opts) {
-    return metaLines(opts) + '\n\n【学生作文】\n' + essayBlock(opts, 'api');
+    var pre = precheckBlock(opts);
+    return metaLines(opts) + '\n\n' +
+      (pre ? pre + '\n\n' : '') +
+      '【学生作文】\n' + essayBlock(opts, 'api');
   }
 
   /** 复制模式的完整单条文本（设计文档 §9.1） */
@@ -181,6 +207,7 @@
     return '请你严格按照以下要求，批改下面这篇大学英语四六级作文。请先完整阅读全部要求，再一次性输出完整报告。\n\n' +
       '===== 批改要求（必须全部遵守）=====\n' + TEMPLATE + '\n\n' + PROTOCOL + '\n\n' + RUBRIC + '\n\n' +
       '===== 作文信息 =====\n' + metaLines(opts) + '\n\n' +
+      (precheckBlock(opts) ? precheckBlock(opts) + '\n\n' : '') +
       '===== 学生作文 =====\n' + essayBlock(opts, 'copy');
   }
 

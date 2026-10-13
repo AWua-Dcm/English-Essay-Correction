@@ -9,7 +9,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const ROOT = path.join(__dirname, '..');
-const SCRIPT_ORDER = ['util', 'render', 'providers', 'prompt', 'api', 'store', 'exporter', 'ocr', 'demo', 'app'];
+const SCRIPT_ORDER = ['util', 'precheck', 'render', 'providers', 'prompt', 'api', 'store', 'exporter', 'ocr', 'demo', 'app'];
 
 async function loadApp(opts = {}) {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');

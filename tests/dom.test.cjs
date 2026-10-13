@@ -532,3 +532,39 @@ test('正常报告仍能渲染，且空分节被跳过', async () => {
   assert.ok($('#paste-warning').hidden, '正常报告不应触发警示');
   assert.strictEqual($all('.step-card').length, 4, '四个分节都应有正文');
 });
+
+/* ---------- 客观预检面板 ---------- */
+
+test('预检面板：输入作文后显示确定性事实，且不出现任何分数结论', async () => {
+  const { $, $all, type } = await loadApp({});
+  assert.ok($('#precheck').hidden, '无正文时应隐藏');
+  const essay = 'Nowadays, with the development of society, online learning is very important. ' +
+    'Many people use it every day. In conclusion, we should use it well and study hard.';
+  type($('#essay-text'), essay);
+  assert.ok(!$('#precheck').hidden, '有正文后应显示预检');
+  const t = $('#precheck').textContent;
+  assert.match(t, /客观预检/);
+  assert.match(t, /只给事实，不给分数/);
+  assert.match(t, /字数 \d+ 词/);
+  // 关键：面板不得给出档位或总分
+  assert.ok(!/\/15|分档|总分/.test(t), '预检面板不得给出分数结论');
+});
+
+test('预检面板：套话与重复词来自作文，必须以纯文本渲染（防注入）', async () => {
+  const { $, type } = await loadApp({});
+  type($('#essay-text'), 'more and more more and more more and more people people people people. ' +
+    'With the development of society we learn. As we all know we grow every single day.');
+  const box = $('#precheck');
+  assert.ok(!box.hidden);
+  assert.strictEqual(box.querySelectorAll('script, img').length, 0, '不应生成任何标签节点');
+  assert.match(box.textContent, /套话命中/);
+  assert.match(box.textContent, /more and more/);
+});
+
+test('预检面板：级别未定时不给出达标结论', async () => {
+  const { $, type } = await loadApp({});
+  type($('#essay-text'), 'word '.repeat(130).trim());
+  const t = $('#precheck').textContent;
+  assert.match(t, /级别未定/, '自动级别下应标注级别未定');
+  assert.ok(!/达标/.test(t), '级别未定不应下达标结论');
+});

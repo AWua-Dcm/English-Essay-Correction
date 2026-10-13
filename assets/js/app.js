@@ -77,6 +77,7 @@
     el.className = 'word-badge' + (wb.status !== 'info' ? ' is-' + wb.status : '');
     el.setAttribute('data-status', wb.status);
     updateActions();   // 输入状态变化 → 同步主按钮可用性（与徽章同源触发点）
+    renderPrecheck();  // 与徽章同源：纯本地统计，无需任何网络或 Key
   }
 
   /** 空态禁用（§5.3 第一行）：无作文且无图片时两个主按钮禁用 */
@@ -147,6 +148,62 @@
       box.appendChild(div);
     });
     syncOcrRow();
+  }
+
+  /* ---------- 客观预检（纯本地即时统计，只给事实不给分数） ---------- */
+
+  /**
+   * 把 precheck 的结果渲染成面板。
+   * 全部用 textContent 构建节点：重复词来自作文正文，属于用户输入，
+   * 绝不能走 innerHTML。
+   */
+  function renderPrecheck() {
+    var box = $('#precheck');
+    var list = $('#precheck-list');
+    if (!box || !list) return;
+    var pc = root.EEC && root.EEC.precheck;
+    var ta = $('#essay-text');
+    var text = (ta && ta.value) || state.text || '';
+    if (!pc || !text.trim() || util.wordCount(text) < 20) { box.hidden = true; return; }
+
+    var a;
+    try { a = pc.analyze(text, levelArg()); } catch (e) { box.hidden = true; return; }
+    if (!a.words) { box.hidden = true; return; }
+
+    var items = [];
+    // 字数与官方扣分：这是最重要的一条，也是唯一能"确定算错就错"的一条
+    if (a.range) {
+      items.push({
+        text: '字数 ' + a.words + ' 词（' + a.level + '要求 ' + a.range[0] + '-' + a.range[1] + '）' +
+          (a.meetsLength ? '，达标' : '，不足，按官方扣分表应扣 ' + a.deduction + ' 分'),
+        warn: !a.meetsLength,
+      });
+    } else {
+      items.push({ text: '字数 ' + a.words + ' 词（级别未定，四级要求 120-180，六级要求 150-200）' });
+    }
+    items.push({ text: '段落 ' + a.paras + ' 段；' + (a.conclusionMarker ? '有结论段（' + a.conclusionMarker + '）' : '未检测到结论段') });
+    items.push({ text: '句长：' + a.sentences + ' 句，平均 ' + a.sentenceLength.mean +
+      ' 词，标准差 ' + a.sentenceLength.std + '，最长 ' + a.sentenceLength.max + ' 词' });
+    items.push({ text: '句式（近似）：' + (a.syntax.length ? a.syntax.join('、') + '，共 ' + a.syntaxCategories + ' 类' : '未检测到') });
+    if (a.cliches.length) {
+      items.push({ text: '套话命中：' + a.cliches.map(function (c) {
+        return c.phrase + (c.count > 1 ? '×' + c.count : '');
+      }).join('、'), warn: a.cliches.length >= 3 });
+    }
+    if (a.repeats.length) {
+      items.push({ text: '高频重复词：' + a.repeats.slice(0, 5).map(function (r) {
+        return r.word + '×' + r.count;
+      }).join('、') });
+    }
+
+    list.textContent = '';
+    items.forEach(function (it) {
+      var li = document.createElement('li');
+      li.textContent = it.text;
+      if (it.warn) li.className = 'pc-warn';
+      list.appendChild(li);
+    });
+    box.hidden = false;
   }
 
   /* ---------- 本地 OCR（免 Key，不上传） ---------- */

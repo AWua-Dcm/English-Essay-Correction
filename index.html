@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>四六级作文 AI 批改台 · 严格对照官方评分标准</title>
-<link rel="icon" href="assets/img/favicon.svg?v=20261013-5">
-<link rel="stylesheet" href="assets/css/style.css?v=20261013-5">
+<link rel="icon" href="assets/img/favicon.svg?v=20261013-6">
+<link rel="stylesheet" href="assets/css/style.css?v=20261013-6">
 </head>
 <body>
 
@@ -65,6 +65,14 @@
           <button id="btn-clear-text" class="clear-btn" type="button" disabled>清除</button>
         </div>
         <textarea id="essay-text" rows="10" spellcheck="false" placeholder="把学生作文粘贴到这里；如果是照片，用下方的「拍照 / 选择图片」"></textarea>
+      </div>
+
+      <div id="precheck" class="precheck" hidden>
+        <div class="precheck-head">
+          <span class="precheck-title">客观预检</span>
+          <span class="precheck-note">只给事实，不给分数——档位由批改模型判断</span>
+        </div>
+        <ul id="precheck-list" class="precheck-list"></ul>
       </div>
 
       <div class="sheet-foot">
@@ -219,15 +227,16 @@
 <div id="toast" class="toast" hidden></div>
 <div id="live-status" class="visually-hidden" aria-live="polite"></div>
 
-<script src="assets/js/util.js?v=20261013-5"></script>
-<script src="assets/js/render.js?v=20261013-5"></script>
-<script src="assets/js/providers.js?v=20261013-5"></script>
-<script src="assets/js/prompt.js?v=20261013-5"></script>
-<script src="assets/js/api.js?v=20261013-5"></script>
-<script src="assets/js/store.js?v=20261013-5"></script>
-<script src="assets/js/exporter.js?v=20261013-5"></script>
-<script src="assets/js/ocr.js?v=20261013-5"></script>
-<script src="assets/js/demo.js?v=20261013-5"></script>
-<script src="assets/js/app.js?v=20261013-5"></script>
+<script src="assets/js/util.js?v=20261013-6"></script>
+<script src="assets/js/precheck.js?v=20261013-6"></script>
+<script src="assets/js/render.js?v=20261013-6"></script>
+<script src="assets/js/providers.js?v=20261013-6"></script>
+<script src="assets/js/prompt.js?v=20261013-6"></script>
+<script src="assets/js/api.js?v=20261013-6"></script>
+<script src="assets/js/store.js?v=20261013-6"></script>
+<script src="assets/js/exporter.js?v=20261013-6"></script>
+<script src="assets/js/ocr.js?v=20261013-6"></script>
+<script src="assets/js/demo.js?v=20261013-6"></script>
+<script src="assets/js/app.js?v=20261013-6"></script>
 </body>
 </html>
