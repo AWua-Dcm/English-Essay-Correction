@@ -76,3 +76,70 @@ test('providers 预设完整性', () => {
   assert.strictEqual(providers.byId('openai').browserDirect, 'proxy-required');
   assert.strictEqual(providers.byId(providers.DEFAULT_PROVIDER_ID).id, 'deepseek');
 });
+
+test('extractScoreBlock：正常 JSON（含围栏变体/前缀散文）', () => {
+  const md = '好的，我来批改。\n\n```JSON\n{"status":"ok","level":"六级","total":12,"tier":"13-15分档","content":4,"structure":3,"vocab":2,"grammar":3}\n```\n\n## 步骤① 总分与分项\n内容';
+  const r = prompt.extractScoreBlock(md);
+  assert.strictEqual(r.parseMode, 'json');
+  assert.strictEqual(r.status, 'ok');
+  assert.strictEqual(r.level, '六级');
+  assert.deepStrictEqual(r.scores, { total: 12, content: 4, structure: 3, vocab: 2, grammar: 3 });
+  assert.ok(!r.textWithout.includes('```json') && !r.textWithout.includes('"total"'));
+  assert.deepStrictEqual(r.annotations, []);
+});
+
+test('extractScoreBlock：和≠总分 → 本地重算 + 注记', () => {
+  const md = '```json\n{"status":"ok","total":15,"content":4,"structure":3,"vocab":2,"grammar":2}\n```\ntext';
+  const r = prompt.extractScoreBlock(md);
+  assert.strictEqual(r.scores.total, 11);
+  assert.ok(r.annotations.some(a => a.includes('不一致')));
+});
+
+test('extractScoreBlock：超范围 → 进入正则降级/降级链', () => {
+  const md = '```json\n{"status":"ok","total":12,"content":9,"structure":3,"vocab":2,"grammar":3}\n```\n## 步骤① 总分与分项\n总分：12 / 15\n内容完整性 4/5、篇章结构 3/4、词汇表达 2/3、语法准确性 3/3';
+  const r = prompt.extractScoreBlock(md);
+  assert.strictEqual(r.parseMode, 'regex');
+  assert.deepStrictEqual(r.scores, { total: 12, content: 4, structure: 3, vocab: 2, grammar: 3 });
+});
+
+test('extractScoreBlock：无围栏 JSON 对象可被扫描到', () => {
+  const r = prompt.extractScoreBlock('前言 {"status":"ok","total":10,"content":4,"structure":2,"vocab":2,"grammar":2} 后文');
+  assert.strictEqual(r.parseMode, 'json'); assert.strictEqual(r.scores.total, 10);
+});
+
+test('extractScoreBlock：unreadable', () => {
+  const r = prompt.extractScoreBlock('```json\n{"status":"unreadable","note":"图片无法辨认"}\n```\n图片太模糊，请重新拍照。');
+  assert.strictEqual(r.status, 'unreadable'); assert.strictEqual(r.scores, null);
+  assert.strictEqual(r.note, '图片无法辨认');
+});
+
+test('extractScoreBlock：完全不合协议 → parseMode none 且正文保留', () => {
+  const r = prompt.extractScoreBlock('这是一段普通批改文字，没有任何结构。');
+  assert.strictEqual(r.parseMode, 'none'); assert.strictEqual(r.scores, null);
+  assert.strictEqual(r.textWithout, '这是一段普通批改文字，没有任何结构。');
+});
+
+test('正则降级容忍 ** 与全角冒号与无空格', () => {
+  const md = '**总分：12/15**\n内容完整性 **4**/5、篇章结构 3 /4、词汇表达：2/3、语法准确性 3/ 3';
+  const r = prompt.extractScoreBlock(md);
+  assert.strictEqual(r.parseMode, 'regex');
+  assert.deepStrictEqual(r.scores, { total: 12, content: 4, structure: 3, vocab: 2, grammar: 3 });
+});
+
+test('tierFor 本地重算（含 0）', () => {
+  assert.strictEqual(prompt.tierFor(14), '13-15分档');
+  assert.strictEqual(prompt.tierFor(12), '10-12分档');
+  assert.strictEqual(prompt.tierFor(0), '1-3分档');
+});
+
+test('splitReport 容错标题变体', () => {
+  const cases = ['## 步骤① 总分与分项', '### 步骤 1 总分与分项', '## 步骤一 总分', '## 步骤①：总分与分项（12/15）'];
+  for (const h of cases) {
+    const r = prompt.splitReport(`${h}\nA\n\n## 步骤② 逐条扣分点\nB\n\n## 步骤③ 修改建议\nC\n\n## 步骤④ 优化版本\nD`);
+    assert.ok(r.found >= 1, h);
+  }
+  const full = prompt.splitReport('前言\n\n## 步骤① 总分与分项\nA\n\n## 步骤② 逐条扣分点\nB\n\n## 步骤③ 修改建议\nC\n\n## 步骤④ 优化版本\nD\n\n### 优化版本正文\noptimized text here\n\n### 主要改动点\n- x');
+  assert.strictEqual(full.found, 4);
+  assert.ok(full.preamble.includes('前言'));
+  assert.strictEqual(prompt.extractOptimizedBody(full.steps[3].body).trim(), 'optimized text here');
+});

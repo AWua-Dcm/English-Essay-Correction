@@ -154,6 +154,189 @@
     return after.replace(/^\n+/, '');
   }
 
+  /* ===== 分数块解析与报告切分（设计文档 §7.1） ===== */
+
+  /** 档次一律本地重算（不信任模型字符串；0 → 1-3分档） */
+  function tierFor(total) {
+    var t = Number(total) || 0;
+    if (t >= 13) return '13-15分档';
+    if (t >= 10) return '10-12分档';
+    if (t >= 7) return '7-9分档';
+    if (t >= 4) return '4-6分档';
+    return '1-3分档';
+  }
+
+  var STEP_MARKERS = { '①': 1, '1': 1, '一': 1, '②': 2, '2': 2, '二': 2, '③': 3, '3': 3, '三': 3, '④': 4, '4': 4, '四': 4 };
+
+  /** 容错切分报告四步骤（标题变体：## ##/###/####、步骤 1/一/①、全角冒号、标题后缀） */
+  function splitReport(md) {
+    var s = String(md == null ? '' : md).replace(/\r\n?/g, '\n');
+    var lines = s.split('\n');
+    var heads = [];
+    for (var i = 0; i < lines.length; i++) {
+      var h = /^\s*#{2,4}\s*步骤\s*([①②③④1-4一-四])/.exec(lines[i]);
+      if (h && STEP_MARKERS[h[1]]) {
+        heads.push({ index: STEP_MARKERS[h[1]], lineNo: i, title: lines[i].replace(/^\s*#+\s*/, '').trim() });
+      }
+    }
+    if (heads.length === 0) return { preamble: s, steps: [], found: 0 };
+    var steps = [];
+    for (var k = 0; k < heads.length; k++) {
+      var start = heads[k].lineNo + 1;
+      var end = (k + 1 < heads.length) ? heads[k + 1].lineNo : lines.length;
+      steps.push({ index: heads[k].index, title: heads[k].title, body: lines.slice(start, end).join('\n').trim() });
+    }
+    return { preamble: lines.slice(0, heads[0].lineNo).join('\n').trim(), steps: steps, found: steps.length };
+  }
+
+  /** 步骤④内的优化作文正文（### 优化版本正文 与下一个标题之间）；缺失返回 null */
+  function extractOptimizedBody(step4Body) {
+    var s = String(step4Body == null ? '' : step4Body);
+    var m = /^\s*#{2,4}[ \t]*优化版本正文[^\n]*$/m.exec(s);
+    if (!m) return null;
+    var rest = s.slice(m.index + m[0].length).replace(/^\n+/, '');
+    var end = /^\s*#{2,4}[ \t]*\S/m.exec(rest);
+    return (end ? rest.slice(0, end.index) : rest).trim();
+  }
+
+  var SCORE_KEYS = ['content', 'structure', 'vocab', 'grammar'];
+  var SCORE_MAX = { content: 5, structure: 4, vocab: 3, grammar: 3 };
+
+  function parseScoreJson(raw) {
+    var t = String(raw).replace(/[​-‍﻿]/g, '').trim();
+    var a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if (a === -1 || b === -1 || b < a) return null;
+    try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { return null; }
+  }
+
+  /** 四个分项必须为范围内整数；不满足返回 null（触发降级链） */
+  function validScores(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    var out = {};
+    for (var i = 0; i < SCORE_KEYS.length; i++) {
+      var k = SCORE_KEYS[i];
+      var v = obj[k];
+      if (typeof v !== 'number' || !isFinite(v) || v !== Math.floor(v)) return null;
+      if (v < 0 || v > SCORE_MAX[k]) return null;
+      out[k] = v;
+    }
+    return out;
+  }
+
+  /** 全部围栏块（``` 与 ~~~），含 lang 与起止位置 */
+  function findFencedBlocks(s) {
+    var re = /```([A-Za-z0-9_-]*)[ \t]*\r?\n([\s\S]*?)```|~~~([A-Za-z0-9_-]*)[ \t]*\r?\n([\s\S]*?)~~~/g;
+    var out = [], m;
+    while ((m = re.exec(s)) !== null) {
+      if (m[1] !== undefined) out.push({ start: m.index, end: m.index + m[0].length, lang: m[1], content: m[2] });
+      else out.push({ start: m.index, end: m.index + m[0].length, lang: m[3], content: m[4] });
+    }
+    return out;
+  }
+
+  /** 无围栏时扫描第一个含 "total"/"status" 的 {...} 对象（花括号配对） */
+  function findUnfencedObject(s) {
+    var i = s.indexOf('{');
+    while (i !== -1) {
+      var depth = 0, j = i, ok = false;
+      for (; j < s.length; j++) {
+        if (s[j] === '{') depth++;
+        else if (s[j] === '}') { depth--; if (depth === 0) { ok = true; break; } }
+      }
+      if (ok) {
+        var cand = s.slice(i, j + 1);
+        if (cand.indexOf('"status"') !== -1 || cand.indexOf('"total"') !== -1) {
+          return { start: i, end: j + 1, text: cand };
+        }
+      }
+      i = s.indexOf('{', i + 1);
+    }
+    return null;
+  }
+
+  function removeRange(s, r) {
+    if (!r) return s;
+    return (s.slice(0, r.start) + s.slice(r.end)).replace(/\n{3,}/g, '\n\n');
+  }
+
+  /**
+   * 分数块解析（三级降级链）：围栏 JSON → 无围栏 JSON 扫描 → 步骤①文本正则 → none。
+   * scores.total 一律为四项之和的本地重算值；解析成功的 JSON 块从 textWithout 中剥离。
+   */
+  function extractScoreBlock(md) {
+    var s = String(md == null ? '' : md);
+    var res = {
+      status: null, level: null, scores: null, note: null,
+      annotations: [], parseMode: 'none', textWithout: s,
+    };
+    var consumed = null;
+    var obj = null;
+
+    var blocks = findFencedBlocks(s);
+    for (var i = 0; i < blocks.length; i++) {
+      var blk = blocks[i];
+      var isJsonLang = blk.lang.toLowerCase() === 'json';
+      var hasKeys = blk.content.indexOf('"status"') !== -1 || blk.content.indexOf('"total"') !== -1;
+      if (isJsonLang && hasKeys) {
+        var parsed = parseScoreJson(blk.content);
+        if (parsed && typeof parsed === 'object') {
+          obj = parsed;
+          consumed = { start: blk.start, end: blk.end };
+          break;
+        }
+      }
+    }
+    if (!obj) {
+      var uf = findUnfencedObject(s);
+      if (uf) {
+        var p2 = parseScoreJson(uf.text);
+        if (p2 && typeof p2 === 'object') { obj = p2; consumed = { start: uf.start, end: uf.end }; }
+      }
+    }
+
+    if (obj) {
+      if (obj.status === 'unreadable') {
+        res.status = 'unreadable';
+        res.note = (typeof obj.note === 'string' && obj.note) ? obj.note : '图片无法辨认';
+        res.parseMode = 'json';
+        res.textWithout = removeRange(s, consumed);
+        return res;
+      }
+      var four = validScores(obj);
+      if (four) {
+        var sum = four.content + four.structure + four.vocab + four.grammar;
+        res.status = 'ok';
+        res.scores = { total: sum, content: four.content, structure: four.structure, vocab: four.vocab, grammar: four.grammar };
+        if (typeof obj.total === 'number' && obj.total !== sum) {
+          res.annotations.push('模型给出总分与四项之和不一致，已按四项之和显示');
+        }
+        if (obj.level === '四级' || obj.level === '六级') res.level = obj.level;
+        res.parseMode = 'json';
+        res.textWithout = removeRange(s, consumed);
+        return res;
+      }
+      // JSON 存在但数值超范围 → 落入正则降级
+    }
+
+    var stripped = s.replace(/\*/g, '');
+    var mc = /内容(?:完整性)?\s*[:：]?\s*(\d)/.exec(stripped);
+    var ms = /篇章结构\s*[:：]?\s*(\d)/.exec(stripped);
+    var mv = /词汇(?:表达)?\s*[:：]?\s*(\d)/.exec(stripped);
+    var mg = /语法(?:准确性)?\s*[:：]?\s*(\d)/.exec(stripped);
+    if (mc && ms && mv && mg) {
+      var four2 = validScores({ content: +mc[1], structure: +ms[1], vocab: +mv[1], grammar: +mg[1] });
+      if (four2) {
+        var sum2 = four2.content + four2.structure + four2.vocab + four2.grammar;
+        res.status = 'ok';
+        res.scores = { total: sum2, content: four2.content, structure: four2.structure, vocab: four2.vocab, grammar: four2.grammar };
+        res.annotations.push('（解析方式：文本提取）');
+        res.parseMode = 'regex';
+        return res; // 正则模式不删改正文
+      }
+    }
+    return res; // 终态：none，正文原样保留
+  }
+
   var api = {
     TEMPLATE: TEMPLATE,
     PROTOCOL: PROTOCOL,
@@ -161,6 +344,10 @@
     buildMetaBlock: buildMetaBlock,
     buildCopyText: buildCopyText,
     displayText: displayText,
+    tierFor: tierFor,
+    splitReport: splitReport,
+    extractOptimizedBody: extractOptimizedBody,
+    extractScoreBlock: extractScoreBlock,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else (root.EEC = root.EEC || {}).prompt = api;
