@@ -495,3 +495,40 @@ test('OCR：警示卡按钮齐备（改用视觉模型 / 改用复制模式）',
   assert.ok(btns.some(x => x.includes('视觉模型')), '缺少改用视觉模型');
   assert.ok(btns.some(x => x.includes('复制模式')), '缺少改用复制模式');
 });
+
+/* ---------- 复制模式：粘贴指令而非报告 ---------- */
+
+test('粘贴「批改指令」本身 → 明确告知，且不渲染空报告', async () => {
+  const { $, $all, click, type, window } = await loadApp({});
+  const instr = window.EEC.prompt.buildCopyText({ level: '四级', title: '', text: 'x', images: 0 });
+  type($('#paste-box'), instr);
+  click($('#btn-render-paste'));
+  assert.ok(!$('#paste-warning').hidden, '未给出提示');
+  assert.match($('#paste-warning-text').textContent, /批改指令/);
+  assert.match($('#paste-warning-text').textContent, /AI/, '应说明该粘贴 AI 的回复');
+  // 关键：不得渲染出四个空分节的骨架
+  assert.strictEqual($all('.step-card').length, 0, '不应渲染任何步骤卡');
+  // 更要紧：协议里含一段示例 JSON（total:12, 10-12分档），会被 extractScoreBlock 当成真分数。
+  // 若放行，页面会显示一个看起来完全可信的 12/15 —— 学生会以为那是自己的成绩。
+  assert.strictEqual($('#scorecard').innerHTML.trim(), '', '不得渲染来自示例 JSON 的评分卡');
+  assert.ok(!$('#report-body').textContent.includes('12'), '报告区不应出现示例分数');
+});
+
+test('只粘贴到步骤标题没有正文 → 同样拦下', async () => {
+  const { $, $all, click, type } = await loadApp({});
+  type($('#paste-box'), '## 步骤① 总分与分项\n\n## 步骤② 逐条扣分点\n\n## 步骤③ 修改建议\n\n## 步骤④ 优化版本\n');
+  click($('#btn-render-paste'));
+  assert.ok(!$('#paste-warning').hidden, '应给出提示');
+  assert.strictEqual($all('.step-card').length, 0, '不应渲染空步骤卡');
+});
+
+test('正常报告仍能渲染，且空分节被跳过', async () => {
+  const { $, $all, click, type } = await loadApp({});
+  const ok = '```json\n{"status":"ok","level":"四级","total":12,"tier":"10-12分档","content":4,"structure":3,"vocab":2,"grammar":3}\n```\n' +
+    '## 步骤① 总分与分项\n内容完整性 4/5。\n\n## 步骤② 逐条扣分点\n1. 主谓不一致\n> Online learning have many advantages.\n\n' +
+    '## 步骤③ 修改建议\n改成 has。\n\n## 步骤④ 优化版本\n### 优化版本正文\n' + 'word '.repeat(130).trim() + '\n\n### 主要改动点\n- 修正主谓一致';
+  type($('#paste-box'), ok);
+  click($('#btn-render-paste'));
+  assert.ok($('#paste-warning').hidden, '正常报告不应触发警示');
+  assert.strictEqual($all('.step-card').length, 4, '四个分节都应有正文');
+});

@@ -503,7 +503,14 @@
       body.appendChild(plain);
       noteParts.push('未识别到步骤①-④标题，报告按整段展示。');
     } else {
+      var emptySteps = [];
       split.steps.forEach(function (step) {
+        // 正文为空的分节不渲染：只留一个光秃秃的标题既没有信息量，
+        // 又会让页面看起来像"报告已经出来了"（粘贴指令时的典型形态）。
+        if (!String(step.body == null ? '' : step.body).trim()) {
+          emptySteps.push(step.index);
+          return;
+        }
         var card = document.createElement('section');
         card.className = 'step-card';
         card.id = 'step-' + step.index;
@@ -549,6 +556,10 @@
         body.appendChild(card);
       });
       if (split.found < 4) noteParts.push('只识别到 ' + split.found + ' 个步骤标题。');
+      if (emptySteps.length) {
+        noteParts.push('步骤' + emptySteps.join('、') + ' 没有正文内容，已跳过显示；' +
+          '请确认复制的是 AI 的完整回复。');
+      }
     }
 
     if (noteParts.length) {
@@ -855,17 +866,42 @@
     $('#paste-warning').hidden = true;
     toast('报告已渲染，可导出或存档');
   }
+  function showPasteWarning(msg) {
+    var box = $('#paste-warning');
+    var txt = $('#paste-warning-text');
+    if (txt && msg) txt.textContent = msg;
+    if (box) box.hidden = false;
+  }
+
   function onRenderPaste() {
     var text = $('#paste-box').value;
     state.pasteBox = text;
     saveDraftSoon();
     if (!text.trim()) { toast('请先把 AI 的批改结果粘贴进来'); return; }
+
+    // 1) 粘贴的是「批改指令」本身？指令里逐字含那四个步骤标题，
+    //    若不做这层判断，会安静地渲染出一份四个空分节的"报告"。
+    if (prompt.looksLikeInstruction(text)) {
+      showPasteWarning('这粘贴的是「批改指令」本身，不是 AI 的批改结果。' +
+        '请先把指令发送到 AI 对话，等它给出报告后，再复制 AI 的回复粘贴到这里。');
+      return;
+    }
+
     var parse = prompt.extractScoreBlock(text);
     var split = prompt.splitReport(parse.textWithout);
     if (split.found === 0) {
-      $('#paste-warning').hidden = false;   // 缺标题一律先确认（§5.3/§9.2），含已解析出分数的情况
+      // 缺标题一律先确认（§5.3/§9.2），含已解析出分数的情况
+      showPasteWarning('未识别到步骤①-④标题，可能粘贴不完整。建议使用聊天应用的「复制」按钮重新复制（保留 Markdown 格式）。');
       return;
     }
+
+    // 2) 标题齐全但正文全空——同样只有骨架，没有报告内容
+    var empties = prompt.emptyStepIndexes(split);
+    if (empties.length === split.steps.length) {
+      showPasteWarning('只粘贴到了步骤标题，没有正文内容。请确认复制的是 AI 的完整回复。');
+      return;
+    }
+
     doPasteRender(text);
   }
 

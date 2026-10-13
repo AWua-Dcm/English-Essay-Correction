@@ -405,11 +405,48 @@
     return res; // 终态：none，正文原样保留
   }
 
+  /* ===== 粘贴内容识别（复制模式：区分"指令"与"报告"） ===== */
+
+  /**
+   * 复制出去的「批改指令」自带的特征串。
+   *
+   * 用户很容易把指令本身粘回渲染框（而不是 AI 的回复）。此时不能只靠"找不到步骤标题"
+   * 来判错——因为 PROTOCOL 里**逐字包含** `## 步骤① 总分与分项` 等四个标题（协议要求
+   * AI 使用它们）。那四个标题会被 splitReport 正常识别，得到四个**空正文**分节，
+   * 于是页面安静地渲染出一份"空白报告"。所以必须单独认出指令本体。
+   */
+  var INSTRUCTION_MARKERS = [
+    '===== 批改要求（必须全部遵守）=====',
+    '===== 作文信息 =====',
+    '===== 学生作文 =====',
+    '请你严格按照以下要求，批改下面这篇大学英语四六级作文',
+  ];
+
+  function looksLikeInstruction(text) {
+    var s = String(text == null ? '' : text);
+    for (var i = 0; i < INSTRUCTION_MARKERS.length; i++) {
+      if (s.indexOf(INSTRUCTION_MARKERS[i]) !== -1) return true;
+    }
+    return false;
+  }
+
+  /** 有标题但正文为空的步骤序号；全部为空说明只粘贴了骨架，没有实际报告内容 */
+  function emptyStepIndexes(split) {
+    var out = [];
+    if (!split || !split.steps) return out;
+    for (var i = 0; i < split.steps.length; i++) {
+      if (!String(split.steps[i].body || '').trim()) out.push(split.steps[i].index);
+    }
+    return out;
+  }
+
   var api = {
     TEMPLATE: TEMPLATE,
     PROTOCOL: PROTOCOL,
     RUBRIC: RUBRIC,
     buildSystemPrompt: buildSystemPrompt,
+    looksLikeInstruction: looksLikeInstruction,
+    emptyStepIndexes: emptyStepIndexes,
     buildMetaBlock: buildMetaBlock,
     buildCopyText: buildCopyText,
     displayText: displayText,

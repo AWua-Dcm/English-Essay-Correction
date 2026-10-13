@@ -200,3 +200,44 @@ test('splitReport 容错标题变体', () => {
   assert.ok(full.preamble.includes('前言'));
   assert.strictEqual(prompt.extractOptimizedBody(full.steps[3].body).trim(), 'optimized text here');
 });
+
+/* ---------- 复制模式：区分「指令」与「报告」 ---------- */
+
+test('looksLikeInstruction：认得自己生成的那份批改指令', () => {
+  const instr = prompt.buildCopyText({ level: '四级', title: '', text: 'x', images: 0 });
+  assert.strictEqual(prompt.looksLikeInstruction(instr), true);
+  // 四段分隔标题任一出现即判定为指令
+  for (const s of ['===== 批改要求（必须全部遵守）=====', '===== 作文信息 =====',
+    '===== 学生作文 =====', '请你严格按照以下要求，批改下面这篇大学英语四六级作文']) {
+    assert.ok(instr.includes(s), `指令缺少特征串: ${s}`);
+    assert.strictEqual(prompt.looksLikeInstruction('前言 ' + s + ' 后文'), true);
+  }
+});
+
+test('looksLikeInstruction：真正的报告不会被误判', () => {
+  const report = '```json\n{"status":"ok","level":"四级","total":12,"tier":"10-12分档","content":4,"structure":3,"vocab":2,"grammar":3}\n```\n' +
+    '## 步骤① 总分与分项\n内容完整性 4/5\n\n## 步骤② 逐条扣分点\n1. 主谓不一致\n> Online learning have many advantages.\n\n' +
+    '## 步骤③ 修改建议\n改成 has。\n\n## 步骤④ 优化版本\n### 优化版本正文\nSome text.\n\n### 主要改动点\n- x';
+  assert.strictEqual(prompt.looksLikeInstruction(report), false);
+  assert.strictEqual(prompt.looksLikeInstruction(''), false);
+  assert.strictEqual(prompt.looksLikeInstruction(null), false);
+});
+
+test('emptyStepIndexes：指令被当成报告时，四个分节里三个是空的', () => {
+  const instr = prompt.buildCopyText({ level: '四级', title: '', text: 'x', images: 0 });
+  const split = prompt.splitReport(instr);
+  // PROTOCOL 逐字含那四个标题（协议要求 AI 使用它们），所以会被识别成 4 个分节
+  assert.strictEqual(split.found, 4, '指令含四步标题，正是误渲染的成因');
+  const empties = prompt.emptyStepIndexes(split);
+  assert.deepStrictEqual(empties, [1, 2, 3], '前三个步骤应为空正文');
+  assert.ok(empties.length > 0 && empties.length < split.steps.length,
+    '不是全部为空——所以仅靠"全空"判断不足以拦住，必须另有指令识别');
+});
+
+test('emptyStepIndexes：正常报告没有空分节', () => {
+  const report = '## 步骤① 总分与分项\nA\n\n## 步骤② 逐条扣分点\nB\n\n## 步骤③ 修改建议\nC\n\n## 步骤④ 优化版本\nD';
+  const split = prompt.splitReport(report);
+  assert.deepStrictEqual(prompt.emptyStepIndexes(split), []);
+  assert.deepStrictEqual(prompt.emptyStepIndexes({ steps: [] }), []);
+  assert.deepStrictEqual(prompt.emptyStepIndexes(null), []);
+});
