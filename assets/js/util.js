@@ -119,6 +119,30 @@
     } catch (e) { /* 由调用方提示"可改用打印或复制" */ }
   }
 
+  /**
+   * 词数徽章文案（设计文档 §5.1.3 三态）
+   * @param {{level: 'cet4'|'cet6'|'auto', count: number, imageCount: number}} opts
+   * @returns {{text: string, status: 'ok'|'low'|'high'|'info'}}
+   */
+  function wordBadge(opts) {
+    opts = opts || {};
+    var level = opts.level || 'auto';
+    var count = opts.count || 0;
+    var imageCount = opts.imageCount || 0;
+    if (count === 0 && imageCount > 0) {
+      return { text: '图片作文 ' + imageCount + ' 张 · 词数以识别结果为准', status: 'info' };
+    }
+    if (count === 0) return { text: '0 词', status: 'info' };
+    if (level === 'cet4' || level === 'cet6') {
+      var lo = (level === 'cet4') ? 120 : 150;
+      var hi = (level === 'cet4') ? 180 : 200;
+      if (count < lo) return { text: count + ' 词 · 偏少 ' + (lo - count) + ' 词', status: 'low' };
+      if (count > hi) return { text: count + ' 词 · 偏多 ' + (count - hi) + ' 词', status: 'high' };
+      return { text: count + ' 词 · 达标', status: 'ok' };
+    }
+    return { text: count + ' 词 · 四级 120–180 / 六级 150–200', status: 'info' };
+  }
+
   const api = {
     escapeHtml: escapeHtml,
     wordCount: wordCount,
@@ -131,6 +155,7 @@
     copyText: copyText,
     isHeic: isHeic,
     imagePolicy: imagePolicy,
+    wordBadge: wordBadge,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

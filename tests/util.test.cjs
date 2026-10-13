@@ -70,3 +70,18 @@ test('copyText 降级链：clipboard 失败走 execCommand，两者失败返回 
   mk(false, true);  assert.strictEqual(await util.copyText('t'), true);
   mk(false, false); assert.strictEqual(await util.copyText('t'), false);
 });
+
+test('wordBadge 三态与官方区间（含 0 词与纯图片）', () => {
+  assert.deepStrictEqual(util.wordBadge({ level: 'cet4', count: 130, imageCount: 0 }),
+    { text: '130 词 · 达标', status: 'ok' });
+  assert.deepStrictEqual(util.wordBadge({ level: 'cet4', count: 100, imageCount: 0 }),
+    { text: '100 词 · 偏少 20 词', status: 'low' });
+  assert.deepStrictEqual(util.wordBadge({ level: 'cet6', count: 214, imageCount: 0 }),
+    { text: '214 词 · 偏多 14 词', status: 'high' });
+  assert.deepStrictEqual(util.wordBadge({ level: 'auto', count: 143, imageCount: 0 }),
+    { text: '143 词 · 四级 120–180 / 六级 150–200', status: 'info' });
+  assert.deepStrictEqual(util.wordBadge({ level: 'cet4', count: 0, imageCount: 0 }),
+    { text: '0 词', status: 'info' });
+  assert.deepStrictEqual(util.wordBadge({ level: 'cet4', count: 0, imageCount: 2 }),
+    { text: '图片作文 2 张 · 词数以识别结果为准', status: 'info' });
+});
