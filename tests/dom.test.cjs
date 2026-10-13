@@ -407,6 +407,28 @@ test('报告工具条：[复制报告全文] 可用', async () => {
   assert.match($('#toast').textContent, /复制/);
 });
 
+/* ================= 后续迭代：一键清除 ================= */
+
+test('一键清除：题目与正文按钮（空态禁用，清除后同步状态）', async () => {
+  const { $, click, type } = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  const bt = $('#btn-clear-title');
+  const be = $('#btn-clear-text');
+  assert.ok(bt && be, '缺少清除按钮');
+  assert.strictEqual(bt.disabled, true, '空题目时应禁用');
+  assert.strictEqual(be.disabled, true, '空正文时应禁用');
+  type($('#essay-title'), 'My Title');
+  type($('#essay-text'), 'word '.repeat(130).trim());
+  assert.strictEqual(bt.disabled, false, '有题目后应可用');
+  assert.strictEqual(be.disabled, false, '有正文后应可用');
+  click(bt);
+  assert.strictEqual($('#essay-title').value, '');
+  assert.strictEqual(bt.disabled, true);
+  click(be);
+  assert.strictEqual($('#essay-text').value, '');
+  assert.match($('#word-badge').textContent, /^0 词$/);
+  assert.strictEqual($('#btn-grade').disabled, true, '清空后主按钮回到禁用');
+});
+
 /* ================= 后续迭代：使用说明可再次展开 ================= */
 
 test('使用说明：关闭后可一键再次展开（有 Key 时也可）', async () => {

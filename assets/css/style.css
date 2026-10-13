@@ -111,6 +111,14 @@ body {
 
 .field { display: block; margin: 12px 0; }
 .field-label { display: block; font-size: 13px; color: var(--mute); margin-bottom: 6px; }
+.field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.field-head .field-label { margin-bottom: 0; }
+.clear-btn {
+  border: none; background: none; color: var(--mute);
+  font-size: 12.5px; cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.clear-btn:hover:not(:disabled) { color: var(--cinnabar); background: #fdf1ef; }
+.clear-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 input[type="text"], input[type="password"], select, textarea {
   width: 100%;
   font: inherit;

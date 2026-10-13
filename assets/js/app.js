@@ -82,11 +82,16 @@
   /** 空态禁用（§5.3 第一行）：无作文且无图片时两个主按钮禁用 */
   function updateActions() {
     var ta = $('#essay-text');
+    var ti = $('#essay-title');
     var empty = !(ta && ta.value.trim()) && state.images.length === 0;
     var g = $('#btn-grade');
     var c = $('#btn-copy-prompt');
     if (g) g.disabled = empty || !!state.streaming;
     if (c) c.disabled = empty;
+    var ct = $('#btn-clear-title');
+    var cx = $('#btn-clear-text');
+    if (ct) ct.disabled = !(ti && ti.value.trim());
+    if (cx) cx.disabled = !(ta && ta.value.trim());
   }
 
   function updateModeStrip() {
@@ -1000,6 +1005,7 @@
     $('#essay-title').addEventListener('input', function () {
       state.title = this.value;
       saveDraftSoon();
+      updateActions();
     });
     $('#essay-text').addEventListener('input', function () {
       state.text = this.value;
@@ -1038,6 +1044,22 @@
       card.hidden = false;
       if (card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       announce('已展开使用说明');
+    });
+    $('#btn-clear-title').addEventListener('click', function () {
+      var ti = $('#essay-title');
+      ti.value = '';
+      state.title = '';
+      saveDraftSoon();
+      updateActions();
+      ti.focus();
+    });
+    $('#btn-clear-text').addEventListener('click', function () {
+      var ta = $('#essay-text');
+      ta.value = '';
+      state.text = '';
+      saveDraftSoon();
+      updateWordBadge();   // 徽章与按钮状态一并同步
+      ta.focus();
     });
     $('#btn-grade').addEventListener('click', onGradeClick);
     $('#btn-copy-prompt').addEventListener('click', onCopyClick);
