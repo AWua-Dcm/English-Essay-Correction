@@ -2,3 +2,16 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Harvested essay corpus. Full text of third-party essays is kept local only:
+# this repository is published via GitHub Pages, so republishing that text here
+# would redistribute material that is not ours. Only distilled rubrics and
+# aggregate statistics get committed (see .claude/skills/cet-essay-grader/).
+corpus/
+
+# Scratch produced while harvesting. Also contains extracted essay text, so it
+# must never be committed either (it is deleted alongside corpus/).
+_scan/
+__pycache__/
+
+
