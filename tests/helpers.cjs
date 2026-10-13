@@ -50,7 +50,48 @@ async function loadApp(opts = {}) {
     for (let i = 0; i < ticks; i++) await new Promise(r => setTimeout(r, ms));
   };
 
-  return { dom, window, document, $, $all, click, type, fireEvent, flushAll };
+  // 让测试里的裸 localStorage 指向当前窗口的存储
+  Object.defineProperty(globalThis, 'localStorage', { value: window.localStorage, configurable: true, writable: true });
+
+  // fetch 桩：支持定时分片流（chunkDelayMs）以测试"流未结束"的中间态
+  const stubFetch = (script) => { window.fetch = makeStubFetch(window, script || {}); };
+
+  return { dom, window, document, $, $all, click, type, fireEvent, flushAll, stubFetch };
+}
+
+function makeStubFetch(window, script) {
+  return async function () {
+    if (script.status && script.status >= 400) {
+      return new window.Response(script.body || '{}', {
+        status: script.status,
+        headers: { 'Content-Type': script.contentType || 'application/json' },
+      });
+    }
+    if (script.chunks) {
+      const encoder = new window.TextEncoder();
+      const delay = script.chunkDelayMs || 0;
+      const stream = new window.ReadableStream({
+        start(controller) {
+          let i = 0;
+          const pump = () => {
+            if (i < script.chunks.length) {
+              try { controller.enqueue(encoder.encode(script.chunks[i])); } catch (e) { /* 流已取消 */ }
+              i++;
+              setTimeout(pump, delay);
+            } else {
+              try { controller.close(); } catch (e) { /* 流已取消 */ }
+            }
+          };
+          pump();
+        },
+      });
+      return new window.Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }
+    return new window.Response(script.body || '', {
+      status: 200,
+      headers: { 'Content-Type': script.contentType || 'application/json' },
+    });
+  };
 }
 
 module.exports = { loadApp };

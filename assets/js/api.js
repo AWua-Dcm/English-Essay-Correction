@@ -194,6 +194,11 @@
     }
     try {
       while (!done && !finishReason) {
+        if (opts.signal && opts.signal.aborted) {
+          var eab = new Error(ERROR_MESSAGES.aborted);
+          eab.kind = 'aborted';
+          throw eab;
+        }
         var r = await reader.read();
         if (r.done) {
           handle(parser.pushLine(''));  // 冲刷未派发事件（无空行结尾的流）
@@ -203,6 +208,7 @@
         for (var i2 = 0; i2 < lines.length; i2++) handle(parser.pushLine(lines[i2]));
       }
     } catch (err) {
+      try { reader.cancel(); } catch (e4) { /* 忽略 */ }
       if (err && err.kind) throw err;
       if (opts.signal && opts.signal.aborted) { var ea = new Error(ERROR_MESSAGES.aborted); ea.kind = 'aborted'; throw ea; }
       throw classifyError({ status: null, error: err });

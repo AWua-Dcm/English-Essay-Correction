@@ -253,8 +253,343 @@
     else card.hidden = false;
   }
 
-  /* ---------- 事件处理（批改/复制在后续部分接入） ---------- */
-  function onGradeClick() { toast('批改功能将随后接入（正在构建中）'); }
+  /* ---------- 自动模式：提交、流式、报告渲染、错误 ---------- */
+  function currentPreset() {
+    return providers.byId(state.settings.providerId) || providers.byId(providers.DEFAULT_PROVIDER_ID);
+  }
+  function currentModel() {
+    return state.settings.model || currentPreset().defaultModel;
+  }
+  function setGradeDisabled(disabled) {
+    var b = $('#btn-grade');
+    if (b) b.disabled = disabled;
+  }
+  function setToolbarEnabled(enabled) {
+    ['#btn-print', '#btn-export-md', '#btn-export-html'].forEach(function (sel) {
+      var el = $(sel);
+      if (el) el.disabled = !enabled;
+    });
+  }
+  function entryLevelFor(parse) {
+    if (parse && parse.level) return parse.level;
+    if (state.level === 'cet4') return '四级';
+    if (state.level === 'cet6') return '六级';
+    return '自动推断';
+  }
+  function followScroll() {
+    var doc = document.documentElement;
+    var nearBottom = (window.innerHeight + window.scrollY) >= ((doc.scrollHeight || 0) - 120);
+    var btn = $('#btn-back-latest');
+    if (btn) btn.hidden = nearBottom;
+    if (nearBottom && window.scrollTo) window.scrollTo(0, doc.scrollHeight || 0);
+  }
+
+  /** 两模式共用的报告渲染（设计文档 §7）。返回历史 entry；渲染状态写入 state。 */
+  function _renderReport(fullText, opts) {
+    opts = opts || {};
+    var parse = prompt.extractScoreBlock(fullText);
+    var display = parse.textWithout;
+    $('#report-area').hidden = false;
+    $('#scorecard').innerHTML = '';
+    var body = $('#report-body');
+    body.innerHTML = '';
+    var note = $('#parse-note');
+    note.hidden = true;
+    note.textContent = '';
+    $('#truncation-banner').hidden = true;
+    state.lastEntry = null;
+    state.reportRendered = false;
+
+    var optWords = null;
+    var noteParts = [];
+    if (opts.aborted) noteParts.push('已停止：内容不完整，可导出已生成部分或重新批改。');
+    else if (opts.interrupted) noteParts.push('生成中断：已保留已生成内容，可重新批改。');
+
+    if (parse.status === 'unreadable') {
+      var ucard = document.createElement('div');
+      ucard.className = 'unreadable-card';
+      ucard.textContent = '图片无法辨认：' + (parse.note || '图片模糊或文字无法看清') + '。请补充文字版或重新拍照后重试。';
+      body.appendChild(ucard);
+      var uentry = buildEntry(parse, display, opts, null);
+      note.hidden = false;
+      note.textContent = noteParts.join(' ');
+      state.lastEntry = uentry;
+      state.reportRendered = true;
+      return uentry;
+    }
+
+    if (parse.scores) {
+      $('#scorecard').innerHTML = exporter.scorecardHtml({
+        scores: parse.scores,
+        tier: prompt.tierFor(parse.scores.total),
+        annotations: parse.annotations,
+      });
+    } else {
+      noteParts.push(parse.parseMode === 'none'
+        ? '未解析到结构化分数：报告已完整展示。'
+        : '未解析到结构化分数。');
+    }
+
+    var split = prompt.splitReport(display);
+    if (split.found === 0) {
+      var plain = document.createElement('div');
+      plain.className = 'report-plain';
+      plain.appendChild(render.toFragment(display));
+      body.appendChild(plain);
+      noteParts.push('未识别到步骤①-④标题，报告按整段展示。');
+    } else {
+      split.steps.forEach(function (step) {
+        var card = document.createElement('section');
+        card.className = 'step-card';
+        card.id = 'step-' + step.index;
+        var h2 = document.createElement('h2');
+        h2.textContent = step.title;
+        card.appendChild(h2);
+        var content = document.createElement('div');
+        content.className = 'step-content';
+        content.appendChild(render.toFragment(step.body));
+        card.appendChild(content);
+        if (step.index === 4) {
+          var opt = prompt.extractOptimizedBody(step.body);
+          if (opt) {
+            optWords = util.wordCount(opt);
+            var lvl = entryLevelFor(parse);
+            var chip = document.createElement('span');
+            chip.className = 'opt-chip';
+            var ranges = { '四级': [120, 180], '六级': [150, 200] };
+            var rg = ranges[lvl];
+            if (rg) {
+              var lo = rg[0], hi = rg[1];
+              var st, cls = '';
+              if (optWords < lo) { st = '偏少 ' + (lo - optWords) + ' 词'; cls = 'is-low'; }
+              else if (optWords > hi) { st = '偏多 ' + (optWords - hi) + ' 词'; cls = 'is-high'; }
+              else st = '达标';
+              if (cls) chip.className += ' ' + cls;
+              chip.textContent = '优化版 ' + optWords + ' 词 · ' + st + '（' + lvl + '要求 ' + lo + '–' + hi + ' 词）';
+            } else {
+              chip.textContent = '优化版 ' + optWords + ' 词（级别未确定，未做达标判定）';
+            }
+            card.appendChild(chip);
+          }
+        }
+        body.appendChild(card);
+      });
+      if (split.found < 4) noteParts.push('只识别到 ' + split.found + ' 个步骤标题。');
+    }
+
+    if (noteParts.length) {
+      note.hidden = false;
+      note.textContent = noteParts.join(' ');
+    }
+
+    var entry = buildEntry(parse, display, opts, optWords);
+    state.lastEntry = entry;
+    state.reportRendered = true;
+    return entry;
+  }
+
+  function buildEntry(parse, display, opts, optWords) {
+    return {
+      ts: Date.now(),
+      level: entryLevelFor(parse),
+      title: state.title,
+      words: util.wordCount(state.text),
+      optimizedWords: optWords,
+      scores: parse.scores || null,
+      source: opts.source || 'auto',
+      status: opts.aborted ? 'stopped' : 'complete',
+      essay: state.text,
+      reportMd: display,
+    };
+  }
+
+  function renderErrorCard(err) {
+    $('#report-area').hidden = false;
+    $('#scorecard').innerHTML = '';
+    var body = $('#report-body');
+    body.innerHTML = '';
+    $('#parse-note').hidden = true;
+    state.lastEntry = null;
+    state.reportRendered = false;
+    setToolbarEnabled(false);
+
+    var card = document.createElement('div');
+    card.className = 'error-card';
+    var p = document.createElement('p');
+    p.textContent = (err && err.message) || '批改失败';
+    card.appendChild(p);
+    var kind = err && err.kind;
+    if (err && err.raw) {
+      var raw = document.createElement('p');
+      raw.className = 'raw';
+      raw.textContent = '原始错误：' + err.raw;
+      card.appendChild(raw);
+    }
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    function mkBtn(label, fn, cls) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn ' + (cls || 'ghost');
+      b.textContent = label;
+      b.addEventListener('click', fn);
+      actions.appendChild(b);
+    }
+    if (kind === 'auth' || kind === 'params' || kind === 'network') {
+      mkBtn('检查 Key / 测试连接', function () { openSettings(); });
+    }
+    if (kind === 'balance') mkBtn('去充值', function () { toast('请打开服务商控制台充值后重试'); });
+    if (kind === 'rate') mkBtn('稍后重试', onGradeClick, 'secondary');
+    if (kind === 'server' || kind === 'stream_error') mkBtn('重试', onGradeClick, 'secondary');
+    if (kind === 'server' || kind === 'params') mkBtn('更换服务商', function () { openSettings(); });
+    mkBtn('改用复制模式', function () { openCopyPanel(); }, 'secondary');
+    card.appendChild(actions);
+    body.appendChild(card);
+    announce('批改失败：' + ((err && err.message) || ''));
+  }
+
+  function finishReport(fullText, opts) {
+    opts = opts || {};
+    var entry = _renderReport(fullText, opts);
+    if (opts.autoStore && entry) {
+      var r = store.addEntry(entry);
+      if (!r.saved) toast('本地保存失败（存储空间不足），请导出重要报告');
+    }
+    setToolbarEnabled(state.reportRendered);
+    if (opts.finishReason === 'length' || opts.maxTokensDropped) {
+      var tb = $('#truncation-banner');
+      tb.hidden = false;
+      tb.textContent = (opts.finishReason === 'length')
+        ? '输出被截断（达到模型输出上限）：报告可能不完整，建议重试或更换模型。'
+        : '已移除输出上限参数（模型不支持），输出可能被截断：建议重试或更换模型。';
+    }
+  }
+
+  async function runStream(ctx) {
+    var ctrl = new AbortController();
+    state.streaming = { abort: ctrl, full: '', maxTokensDropped: false };
+    setGradeDisabled(true);
+    var streamStatus = $('#stream-status');
+    streamStatus.hidden = false;
+    var elapsedEl = $('#stream-elapsed');
+    var waited = 0;
+    elapsedEl.textContent = '批改中… 已等待 0 秒';
+    var elapsedTimer = setInterval(function () {
+      waited += 1;
+      elapsedEl.textContent = '批改中… 已等待 ' + waited + ' 秒' + (waited >= 15 ? '（模型思考中）' : '');
+    }, 1000);
+    $('#report-area').hidden = false;
+    $('#truncation-banner').hidden = true;
+    $('#parse-note').hidden = true;
+    $('#scorecard').innerHTML = '';
+    setToolbarEnabled(false);
+    state.lastEntry = null;
+    state.reportRendered = false;
+    announce('开始批改');
+
+    var renderer = render.createStreamRenderer($('#report-body'));
+    var lastRenderAt = 0;
+    function throttledRender() {
+      var now = Date.now();
+      if (now - lastRenderAt < 100) return;
+      lastRenderAt = now;
+      renderer.update(prompt.displayText(state.streaming.full));
+      followScroll();
+    }
+
+    function send(extra) {
+      return api.streamChat({
+        preset: ctx.preset,
+        apiKey: state.settings.apiKey,
+        model: ctx.model,
+        baseURL: state.settings.baseURL || ctx.preset.baseURL,
+        messages: [
+          { role: 'system', content: prompt.buildSystemPrompt() },
+          { role: 'user', content: ctx.userContent },
+        ],
+        extra: extra,
+        signal: ctrl.signal,
+        onDelta: function (t) {
+          if (!state.streaming) return;
+          state.streaming.full += t;
+          throttledRender();
+        },
+      });
+    }
+
+    try {
+      var extra = { temperature: 0.6, max_tokens: ctx.maxTokens };
+      var res;
+      try {
+        res = await send(extra);
+      } catch (e) {
+        if (!e || e.kind !== 'params') throw e;
+        delete extra.temperature;
+        try { res = await send(extra); }
+        catch (e2) {
+          if (!e2 || e2.kind !== 'params') throw e2;
+          delete extra.max_tokens;
+          state.streaming.maxTokensDropped = true;
+          res = await send(extra);
+        }
+      }
+      finishReport(state.streaming.full, {
+        source: 'auto',
+        finishReason: res.finishReason,
+        maxTokensDropped: state.streaming.maxTokensDropped,
+        interrupted: !res.finishReason && !res.usedFallbackNonStream,
+        autoStore: true,
+      });
+    } catch (e) {
+      if (e && e.kind === 'aborted') {
+        finishReport(state.streaming.full, { source: 'auto', aborted: true, autoStore: true });
+      } else {
+        renderErrorCard(e);
+      }
+    } finally {
+      clearInterval(elapsedTimer);
+      streamStatus.hidden = true;
+      state.streaming = null;
+      setGradeDisabled(false);
+      announce('批改结束');
+    }
+  }
+
+  async function onGradeClick() {
+    if (state.streaming) return;
+    state.text = $('#essay-text').value;
+    state.title = $('#essay-title').value;
+    if (!state.text.trim() && state.images.length === 0) { toast('请先粘贴作文或上传图片'); return; }
+    if (!state.settings.apiKey) {
+      openCopyPanel();
+      toast('还没有 Key？点 [复制批改指令] → 粘贴到任意 AI → 把结果粘回这里');
+      return;
+    }
+    var preset = currentPreset();
+    var model = currentModel();
+    if (state.images.length > 0 && preset.visionModels.indexOf(model) === -1) {
+      toast('当前模型（' + model + '）不支持图片识别，请更换支持视觉的模型或改用复制模式');
+      return;
+    }
+    var meta = prompt.buildMetaBlock({
+      level: levelArg(), title: state.title, text: state.text, images: state.images.length,
+    });
+    var userContent = meta;
+    if (state.images.length) {
+      userContent = [{ type: 'text', text: meta }].concat(state.images.map(function (im) {
+        return { type: 'image_url', image_url: { url: im.dataUrl } };
+      }));
+    }
+    var est = api.estimateInputTokens(
+      JSON.stringify(userContent).length + prompt.buildSystemPrompt().length,
+      state.images.length
+    );
+    var maxTokens = api.computeMaxTokens(preset, est);
+    if (maxTokens <= 512) { toast('作文过长或模型上限太小，无法安全生成完整报告'); return; }
+    await runStream({ preset: preset, model: model, userContent: userContent, maxTokens: maxTokens });
+  }
+
+  /* 复制模式（完整接线在第三部分） */
   function onCopyClick() { openCopyPanel(); toast('复制功能将随后接入（正在构建中）'); }
   function onRenderPaste() { toast('渲染功能将随后接入（正在构建中）'); }
 
@@ -311,6 +646,29 @@
     $('#btn-copy-prompt').addEventListener('click', onCopyClick);
     $('#btn-render-paste').addEventListener('click', onRenderPaste);
 
+    $('#btn-stop').addEventListener('click', function () {
+      if (state.streaming) state.streaming.abort.abort();
+    });
+    $('#btn-regrade').addEventListener('click', onGradeClick);
+    $('#btn-back-latest').addEventListener('click', function () {
+      if (window.scrollTo) window.scrollTo(0, document.documentElement.scrollHeight || 0);
+      $('#btn-back-latest').hidden = true;
+    });
+    var navLinks = document.querySelectorAll('.nav-link');
+    for (var n = 0; n < navLinks.length; n++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var target = btn.getAttribute('data-target');
+          if (target) {
+            var el = document.getElementById(target);
+            if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (window.scrollTo) {
+            window.scrollTo(0, 0);
+          }
+        });
+      })(navLinks[n]);
+    }
+
     $('#drawer-backdrop').addEventListener('click', closeDrawers);
     var closers = document.querySelectorAll('.drawer-close');
     for (var c = 0; c < closers.length; c++) closers[c].addEventListener('click', closeDrawers);
@@ -355,7 +713,7 @@
     else boot();
   }
 
-  var api = {
+  var appExports = {
     state: state,
     _timing: _timing,
     boot: boot,
@@ -368,9 +726,9 @@
     closeDrawers: closeDrawers,
   };
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = appExports;
   else {
-    (root.EEC = root.EEC || {}).app = api;
+    (root.EEC = root.EEC || {}).app = appExports;
     scheduleBoot();
   }
 })(typeof self !== 'undefined' ? self : globalThis);
