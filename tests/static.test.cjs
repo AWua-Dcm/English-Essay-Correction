@@ -1,0 +1,50 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM } = require('jsdom');
+
+const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+const doc = new JSDOM(html).window.document;
+
+test('相对路径硬约束', () => {
+  assert.ok(!/(src|href)\s*=\s*"\/[^"]/.test(html), '出现以 / 开头的资源引用');
+  assert.ok(!html.includes('awua-dcm.github.io'), '写死了部署域名');
+});
+
+test('脚本加载顺序', () => {
+  const order = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src'));
+  assert.deepStrictEqual(order, [
+    'assets/js/util.js', 'assets/js/render.js', 'assets/js/providers.js', 'assets/js/prompt.js',
+    'assets/js/api.js', 'assets/js/store.js', 'assets/js/exporter.js', 'assets/js/demo.js', 'assets/js/app.js',
+  ]);
+});
+
+test('DOM 契约元素齐全', () => {
+  const ids = ['mode-strip','history-open','first-run-card','first-run-close','file-banner','wechat-banner',
+    'level-pills','essay-title','essay-text','word-badge','image-input-camera','image-input-gallery',
+    'image-thumbs','sticky-actions','btn-grade','btn-copy-prompt','btn-demo',
+    'copy-panel','copy-prompt-preview','btn-copy-text','paste-box','btn-render-paste','paste-warning','btn-render-anyway','copy-tip',
+    'report-area','report-nav','nav-top','scorecard','parse-note','report-body','report-toolbar',
+    'btn-print','btn-export-md','btn-export-html','btn-regrade','stream-status','btn-stop',
+    'btn-back-latest','truncation-banner','drawer-backdrop','settings-drawer','sel-provider','inp-key',
+    'btn-toggle-key','inp-model','inp-baseurl','btn-test-conn','btn-save-settings','btn-clear-data',
+    'preset-date','history-drawer','history-list','btn-clear-history','toast','live-status'];
+  for (const id of ids) assert.ok(doc.getElementById(id), `缺少 #${id}`);
+});
+
+test('移动端与可访问性要素', () => {
+  assert.match(html, /name="viewport"[^>]*width=device-width/);
+  assert.match(html, /capture="environment"/);
+  assert.match(html, /accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.strictEqual(doc.getElementById('live-status').getAttribute('aria-live'), 'polite');
+  assert.match(html, /role="dialog"/);
+});
+
+test('页脚承诺文案与免责声明', () => {
+  assert.ok(html.includes('复制模式'));
+  assert.ok(html.includes('仅供学习参考'));
+  assert.ok(html.includes('图片作文'));
+  assert.ok(html.includes('不会离开'));
+});

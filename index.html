@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四六级作文 AI 批改台 · 严格对照官方评分标准</title>
+<link rel="icon" href="assets/img/favicon.svg">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<div id="file-banner" class="banner" hidden>
+  <p>本地文件模式：批改仍需联网；自动批改可能被浏览器安全策略拦截，建议使用复制模式。</p>
+</div>
+<div id="wechat-banner" class="banner" hidden>
+  <p>微信内复制 / 下载 / 打印可能受限，建议点右上角 ⋯ → 在浏览器打开。</p>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="masthead-line">
+      <div>
+        <h1>四六级作文 AI 批改台</h1>
+        <p class="sub">严格对照大学英语四六级官方评分标准 · 四步批改</p>
+      </div>
+      <button id="history-open" class="ghost-btn" type="button">历史记录</button>
+    </div>
+    <button id="mode-strip" class="mode-strip" type="button" aria-label="当前批改模式，点击进入设置">自动批改 · DeepSeek</button>
+  </header>
+
+  <div id="first-run-card" class="onboard">
+    <h2>两种用法，任选其一</h2>
+    <ol>
+      <li><strong>有 API Key</strong>：在设置里填好 Key，粘贴作文后点「开始批改」，页内直接出报告。</li>
+      <li><strong>没有 Key</strong>：点「复制批改指令」，粘贴到任意免费 AI（DeepSeek 网页版 / Kimi / 豆包 / 通义 / ChatGPT），再把结果粘回本页排版。</li>
+    </ol>
+    <p class="onboard-note">复制模式全程免费。图片作文请把照片直接发到 AI 对话里，推荐使用支持看图的 Kimi / 豆包 / 通义。</p>
+    <button id="first-run-close" class="ghost-btn" type="button">知道了</button>
+  </div>
+
+  <main>
+    <section class="input-card" aria-label="作文输入">
+      <div id="level-pills" class="pills" role="group" aria-label="考试级别">
+        <button class="level-pill" data-level="cet4" type="button">四级</button>
+        <button class="level-pill" data-level="cet6" type="button">六级</button>
+        <button class="level-pill" data-level="auto" type="button">自动推断</button>
+      </div>
+
+      <label class="field">
+        <span class="field-label">作文题目（选填，留空则由 AI 推断）</span>
+        <input id="essay-title" type="text" autocomplete="off" placeholder="例如：On the Importance of Reading">
+      </label>
+
+      <label class="field">
+        <span class="field-label">作文正文</span>
+        <textarea id="essay-text" rows="10" spellcheck="false" placeholder="把学生作文粘贴到这里；如果是照片，用下方的「拍照 / 选择图片」"></textarea>
+      </label>
+
+      <div class="sheet-foot">
+        <span id="word-badge" class="word-badge" data-status="info">0 词</span>
+        <div class="upload-row">
+          <label class="up-btn" for="image-input-camera">拍照</label>
+          <input id="image-input-camera" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+          <label class="up-btn" for="image-input-gallery">选择图片</label>
+          <input id="image-input-gallery" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+        </div>
+      </div>
+      <p class="hint">图片识别需要所选模型支持视觉；最多 3 张，会自动压缩。</p>
+      <div id="image-thumbs" class="thumbs" aria-label="已选择的图片"></div>
+
+      <div id="sticky-actions" class="sticky-actions">
+        <button id="btn-grade" class="btn primary" type="button">开始批改</button>
+        <button id="btn-copy-prompt" class="btn secondary" type="button">复制批改指令</button>
+        <button id="btn-demo" class="btn ghost" type="button">填入示例作文</button>
+      </div>
+    </section>
+
+    <section id="copy-panel" class="copy-panel" hidden aria-label="复制模式">
+      <h2>复制模式（免 Key，全程免费）</h2>
+      <p id="copy-tip" class="tip">已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。</p>
+      <label class="field">
+        <span class="field-label">批改指令（可展开查看，只读）</span>
+        <textarea id="copy-prompt-preview" rows="5" readonly></textarea>
+      </label>
+      <button id="btn-copy-text" class="btn secondary" type="button">复制指令</button>
+      <label class="field">
+        <span class="field-label">把 AI 的批改结果粘贴到这里</span>
+        <textarea id="paste-box" rows="6" spellcheck="false" placeholder="整段粘贴回来即可"></textarea>
+      </label>
+      <div id="paste-warning" class="warn-bar" hidden>
+        <p>未识别到步骤①-④标题，可能粘贴不完整。建议使用聊天应用的「复制」按钮重新复制（保留 Markdown 格式）。</p>
+        <button id="btn-render-anyway" class="btn ghost" type="button">仍然渲染</button>
+      </div>
+      <button id="btn-render-paste" class="btn primary" type="button">渲染报告</button>
+    </section>
+
+    <section id="report-area" hidden aria-label="批改报告">
+      <nav id="report-nav" class="report-nav" aria-label="报告内导航">
+        <button class="nav-link" data-target="scorecard" type="button">评分卡</button>
+        <button class="nav-link" data-target="step-1" type="button">①</button>
+        <button class="nav-link" data-target="step-2" type="button">②</button>
+        <button class="nav-link" data-target="step-3" type="button">③</button>
+        <button class="nav-link" data-target="step-4" type="button">④</button>
+        <button id="nav-top" class="nav-link" type="button">回到顶部</button>
+      </nav>
+
+      <div id="stream-status" class="stream-status" hidden>
+        <p class="stream-line"><span class="spinner" aria-hidden="true"></span><span id="stream-elapsed">批改中…</span></p>
+        <button id="btn-stop" class="btn ghost" type="button">停止</button>
+      </div>
+
+      <div id="parse-note" class="parse-note" hidden></div>
+      <div id="truncation-banner" class="trunc-banner" hidden>输出被截断（达到模型输出上限）：报告可能不完整，建议重试或更换模型。</div>
+
+      <div id="scorecard" class="scorecard-slot"></div>
+      <div id="report-body" class="report-body"></div>
+
+      <div id="report-toolbar" class="report-toolbar">
+        <button id="btn-print" class="btn ghost" type="button" disabled>打印 / 存为 PDF</button>
+        <button id="btn-export-md" class="btn ghost" type="button" disabled>导出 .md</button>
+        <button id="btn-export-html" class="btn ghost" type="button" disabled>导出 .html</button>
+        <button id="btn-regrade" class="btn secondary" type="button">重新批改</button>
+      </div>
+
+      <button id="btn-back-latest" class="back-latest" type="button" hidden>↓ 回到最新</button>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>免 Key 也能批改（复制模式），全程免费。图片作文在复制模式下：请把作文照片直接发送到你所用的 AI 对话里（推荐 Kimi / 豆包 / 通义），本页上传的照片只作预览与记录，不会离开你的浏览器。</p>
+    <p>批改结果由 AI 生成，仅供学习参考，不代表官方评分。</p>
+    <p>API Key 与作文内容只保存在你的浏览器；批改内容仅发送给你选择的大模型服务。</p>
+  </footer>
+</div>
+
+<div id="drawer-backdrop" class="backdrop" hidden></div>
+
+<aside id="settings-drawer" class="drawer" role="dialog" aria-modal="true" aria-label="设置" hidden>
+  <div class="drawer-head">
+    <h2>设置</h2>
+    <button class="drawer-close" data-close type="button" aria-label="关闭设置">✕</button>
+  </div>
+  <label class="field">
+    <span class="field-label">服务商</span>
+    <select id="sel-provider"></select>
+  </label>
+  <p id="preset-date" class="preset-date"></p>
+  <label class="field">
+    <span class="field-label">API Key（只保存在你的浏览器）</span>
+    <span class="key-row">
+      <input id="inp-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+      <button id="btn-toggle-key" class="btn ghost" type="button">显示</button>
+    </span>
+  </label>
+  <label class="field">
+    <span class="field-label">模型名（可编辑）</span>
+    <input id="inp-model" type="text" autocomplete="off" spellcheck="false">
+  </label>
+  <label class="field">
+    <span class="field-label">自定义接口地址（选「自定义」时填写）</span>
+    <input id="inp-baseurl" type="text" autocomplete="off" spellcheck="false" placeholder="https://…（OpenAI 兼容）">
+  </label>
+  <div class="drawer-actions">
+    <button id="btn-test-conn" class="btn ghost" type="button">测试连接</button>
+    <button id="btn-save-settings" class="btn primary" type="button">保存</button>
+    <button id="btn-clear-data" class="btn danger" type="button">清空全部本地数据</button>
+  </div>
+</aside>
+
+<aside id="history-drawer" class="drawer" role="dialog" aria-modal="true" aria-label="历史记录" hidden>
+  <div class="drawer-head">
+    <h2>历史记录</h2>
+    <button class="drawer-close" data-close type="button" aria-label="关闭历史记录">✕</button>
+  </div>
+  <p class="hint">历史仅存本机浏览器，建议导出重要报告。</p>
+  <div id="history-list" class="history-list"></div>
+  <button id="btn-clear-history" class="btn danger" type="button">全部清空</button>
+</aside>
+
+<div id="toast" class="toast" hidden></div>
+<div id="live-status" class="visually-hidden" aria-live="polite"></div>
+
+<script src="assets/js/util.js"></script>
+<script src="assets/js/render.js"></script>
+<script src="assets/js/providers.js"></script>
+<script src="assets/js/prompt.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/exporter.js"></script>
+<script src="assets/js/demo.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
