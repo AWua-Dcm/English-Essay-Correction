@@ -48,3 +48,11 @@ test('页脚承诺文案与免责声明', () => {
   assert.ok(html.includes('图片作文'));
   assert.ok(html.includes('不会离开'));
 });
+
+test('README 必需小节齐全', () => {
+  const md = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+  for (const s of ['快速开始', '两种批改模式', '免费', 'API Key 申请', '常见问题',
+    '复制模式', '离线', 'zip', '维护', '隐私', '免责', '更新']) {
+    assert.ok(md.includes(s), `README 缺少: ${s}`);
+  }
+});
