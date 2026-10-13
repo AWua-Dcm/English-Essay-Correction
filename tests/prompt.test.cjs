@@ -29,8 +29,49 @@ test('组装后的提示词不含仓库管理语言（防脚手架泄漏）', ()
   }
 });
 
-test('buildSystemPrompt = TEMPLATE + PROTOCOL', () => {
-  assert.strictEqual(prompt.buildSystemPrompt(), prompt.TEMPLATE + '\n\n' + prompt.PROTOCOL);
+test('buildSystemPrompt = TEMPLATE + PROTOCOL + RUBRIC', () => {
+  assert.strictEqual(
+    prompt.buildSystemPrompt(),
+    prompt.TEMPLATE + '\n\n' + prompt.PROTOCOL + '\n\n' + prompt.RUBRIC
+  );
+});
+
+test('RUBRIC v3 采用官方五档对照法', () => {
+  for (const s of ['官方评分办法', '总体印象评分', 'Global Scoring',
+    '不按语言点错误数目扣分', '与某档相似即定该分', '±1 分',
+    '14分档', '11分档', '8分档', '5分档', '2分档', '0分',
+    '定档自查项', '用于确认，不用于算分',
+    '四级（不足 120 词起算）', '六级（不足 150 词起算）',
+    '49 及以下扣 9', '79 及以下扣 9',
+    '不计入', '按比例扣分',
+    '四项之和必须等于总分', '四项必须与总分档位自洽',
+    '避免趋中倾向', '严禁默认给出 11-13 分']) {
+    assert.ok(prompt.RUBRIC.includes(s), `标尺缺少: ${s}`);
+  }
+  // v2 的硬计数封顶与官方"不按语言点错误数目扣分"相抵触，不得残留
+  assert.ok(!/破句密度/.test(prompt.RUBRIC), '仍残留 v2 的破句密度封顶');
+  assert.ok(!/总分 ≤9/.test(prompt.RUBRIC), '仍残留 v2 的硬封顶');
+  assert.ok(!/万能句占正文句子/.test(prompt.RUBRIC), '仍残留 v2 的万能句封顶');
+});
+
+test('RUBRIC 字数扣分与官方表一致（含低端陡增段）', () => {
+  // 官方表不是"每少 10 词扣 1 分"的线性规则：≤49 词直接扣 9
+  assert.ok(/49 及以下扣 9/.test(prompt.RUBRIC), '四级缺 49 词以下的陡增段');
+  assert.ok(/79 及以下扣 9/.test(prompt.RUBRIC), '六级缺 79 词以下的陡增段');
+  assert.ok(!/每少 10 词扣 1 分/.test(prompt.RUBRIC), '仍残留被简化的线性规则');
+});
+
+test('两种模式共用同一套批改规则（含标尺）', () => {
+  const copy = prompt.buildCopyText({ level: '四级', title: 'T', text: 'x', images: 0 });
+  assert.ok(copy.includes(prompt.RUBRIC), '复制模式缺少档位标尺');
+  assert.ok(prompt.buildSystemPrompt().includes(prompt.RUBRIC), '自动模式缺少档位标尺');
+});
+
+test('TEMPLATE / PROTOCOL 仍是逐字正本（新增标尺不得改动它们）', () => {
+  assert.ok(!prompt.TEMPLATE.includes('档位标尺'));
+  assert.ok(!prompt.PROTOCOL.includes('档位标尺'));
+  assert.ok(!prompt.TEMPLATE.includes('反虚高'));
+  assert.ok(!prompt.PROTOCOL.includes('反虚高'));
 });
 
 test('元信息三态字符串', () => {
