@@ -166,7 +166,91 @@
 
   function renderMarkdown(md) { return toFragment(md); }
 
-  var api = { toHtml: toHtml, toFragment: toFragment, renderMarkdown: renderMarkdown };
+  /** 块边界切分：最后一个"空行且不在围栏内"的切点之前为稳定前缀，之后为未稳定尾部 */
+  function splitStable(md) {
+    var lines = md.split('\n');
+    var fence = false, cut = -1;
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (/^(```|~~~)/.test(t)) fence = !fence;
+      if (!fence && t === '' && i > 0) cut = i; // 候选切点（空行位置）
+    }
+    if (cut === -1 || fence) return { stable: '', tail: md };
+    return { stable: lines.slice(0, cut + 1).join('\n'), tail: lines.slice(cut + 1).join('\n') };
+  }
+
+  /** 视觉补全：未闭合围栏 / 未成对粗体标记（仅渲染层，原始 md 不变） */
+  function autoClose(md) {
+    var lines = md.split('\n');
+    var fenceCount = 0;
+    for (var i = 0; i < lines.length; i++) if (/^\s*(```|~~~)/.test(lines[i])) fenceCount++;
+    if (fenceCount % 2 === 1) md += '\n```';
+    var boldCount = (md.match(/\*\*/g) || []).length;
+    if (boldCount % 2 === 1) md += '**';
+    return md;
+  }
+
+  /**
+   * 稳定前缀追加式流式渲染（设计文档 §7.2）：
+   * 已完成块只渲染一次、永不重绘（保留用户选区与滚动）；每个 tick 只重渲染最后一个未稳定块；
+   * 尾部未闭合标记显示时自动补全。元素创建一律经由 container.ownerDocument
+   * （浏览器中即 document；Node + jsdom 测试环境下没有全局 document）。
+   */
+  function createStreamRenderer(container) {
+    var doc = (container && container.ownerDocument) ||
+              (typeof document !== 'undefined' ? document : null);
+    var stableDiv = null, tailDiv = null, stableMd = '';
+    function frag(md) {
+      var tpl = doc.createElement('template');
+      tpl.innerHTML = toHtml(md);
+      return tpl.content;
+    }
+    function ensure() {
+      if (stableDiv && tailDiv) return;
+      stableDiv = doc.createElement('div');
+      stableDiv.className = 'stream-stable';
+      tailDiv = doc.createElement('div');
+      tailDiv.className = 'stream-tail';
+      container.appendChild(stableDiv);
+      container.appendChild(tailDiv);
+    }
+    function renderStable(stable) {
+      if (stable === stableMd) return;
+      if (stableMd && stable.indexOf(stableMd) === 0) {
+        var delta = stable.slice(stableMd.length);
+        if (delta) stableDiv.appendChild(frag(delta)); // 只追加增量，已完成块永不重绘
+      } else {
+        stableDiv.innerHTML = '';
+        if (stable) stableDiv.appendChild(frag(stable));
+      }
+      stableMd = stable;
+    }
+    return {
+      update: function (fullMd) {
+        ensure();
+        var parts = splitStable(String(fullMd == null ? '' : fullMd));
+        renderStable(parts.stable);
+        tailDiv.innerHTML = '';
+        var closed = autoClose(parts.tail);
+        if (closed) tailDiv.appendChild(frag(closed));
+      },
+      finalize: function () {
+        if (!tailDiv) return;
+        tailDiv.classList.remove('stream-tail'); // 视觉补全保留：源文本真未闭合时，闭合显示对读者更友好
+      },
+      clear: function () {
+        container.innerHTML = '';
+        stableDiv = null; tailDiv = null; stableMd = '';
+      },
+    };
+  }
+
+  var api = {
+    toHtml: toHtml,
+    toFragment: toFragment,
+    renderMarkdown: renderMarkdown,
+    createStreamRenderer: createStreamRenderer,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else (root.EEC = root.EEC || {}).render = api;
 })(typeof self !== 'undefined' ? self : globalThis);

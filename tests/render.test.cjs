@@ -64,3 +64,34 @@ test('图片语法渲染为纯文本（不支持）', () => {
 test('未知语法按普通段落降级', () => {
   assert.match(render.toHtml('| a | b |'), /<p>\| a \| b \|<\/p>/);
 });
+
+test('流式：完成块只渲染一次，尾部块被重渲染', () => {
+  // 用 jsdom 提供 DOM
+  const { JSDOM } = require('jsdom');
+  const dom = new JSDOM('<div id="c"></div>');
+  const c = dom.window.document.getElementById('c');
+  const sr = render.createStreamRenderer(c);
+  sr.update('## 标题A\n\n正文一');
+  const h2 = c.querySelector('h2');
+  const h2Ref = h2;
+  sr.update('## 标题A\n\n正文一\n\n## 标题B\n\n正文二');
+  assert.strictEqual(c.querySelector('h2'), h2Ref, '已完成块被重绘了');
+  assert.strictEqual(c.querySelectorAll('h2').length, 2);
+});
+
+test('流式：未闭合围栏显示为已闭合（尾部不整段吞掉）', () => {
+  const { JSDOM } = require('jsdom');
+  const dom = new JSDOM('<div id="c"></div>');
+  const c = dom.window.document.getElementById('c');
+  const sr = render.createStreamRenderer(c);
+  sr.update('段前\n\n```\ncode line');
+  assert.ok(c.querySelector('pre code'), '未闭合围栏应显示为代码块');
+  sr.finalize();
+});
+
+test('流式：clear 清空容器', () => {
+  const { JSDOM } = require('jsdom');
+  const c = new JSDOM('<div id="c"></div>').window.document.getElementById('c');
+  const sr = render.createStreamRenderer(c);
+  sr.update('x'); sr.clear(); assert.strictEqual(c.innerHTML, '');
+});
