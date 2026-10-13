@@ -77,7 +77,7 @@
 
   /**
    * 剪贴板写入降级链（绝不假成功）：
-   * 一级 navigator.clipboard.writeText → 二级 隐藏 textarea + execCommand → 失败返回 false，由调用方走人工选中。
+   * 一级 navigator.clipboard.writeText → 二级 execCommandCopy → 失败返回 false，由调用方走人工选中。
    */
   async function copyText(text) {
     try {
@@ -86,8 +86,13 @@
         return true;
       }
     } catch (e) { /* 落入下一级 */ }
+    return execCommandCopy(text);
+  }
+
+  /** 同步降级路径：隐藏 textarea + execCommand（file://、嵌内浏览器、测试环境） */
+  function execCommandCopy(text) {
     try {
-      if (typeof document === 'undefined') return false;
+      if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false;
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.setAttribute('readonly', '');
@@ -102,6 +107,11 @@
     } catch (e) {
       return false;
     }
+  }
+
+  /** 供调用方在无异步剪贴板 API 时同步尝试（结果立即可判定） */
+  function copyTextCompat(text) {
+    return execCommandCopy(text);
   }
 
   /** 浏览器端下载文本文件；不支持时静默交给调用方兜底 */
@@ -156,6 +166,7 @@
     isHeic: isHeic,
     imagePolicy: imagePolicy,
     wordBadge: wordBadge,
+    copyTextCompat: copyTextCompat,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

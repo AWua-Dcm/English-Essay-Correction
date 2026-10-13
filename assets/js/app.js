@@ -221,8 +221,16 @@
     $('#drawer-backdrop').hidden = true;
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
-  function openSettings() { openDrawer('settings-drawer'); }
-  function openHistory() { openDrawer('history-drawer'); }
+  function openSettings() {
+    populateProviderSelect();
+    fillSettingsForm();
+    openDrawer('settings-drawer');
+  }
+  function openHistory() {
+    renderHistoryList();
+    closeDrawers();
+    openDrawer('history-drawer');
+  }
 
   /* ---------- 复制模式面板（逻辑接线在后续部分） ---------- */
   function openCopyPanel() {
@@ -288,6 +296,8 @@
   function _renderReport(fullText, opts) {
     opts = opts || {};
     var parse = prompt.extractScoreBlock(fullText);
+    if (opts.stored && opts.stored.scores) parse.scores = opts.stored.scores;   // 历史载入：用存储分数
+    if (opts.stored && opts.stored.level && opts.stored.level !== '自动推断') parse.level = opts.stored.level;
     var display = parse.textWithout;
     $('#report-area').hidden = false;
     $('#scorecard').innerHTML = '';
@@ -357,18 +367,17 @@
             var chip = document.createElement('span');
             chip.className = 'opt-chip';
             var ranges = { '四级': [120, 180], '六级': [150, 200] };
-            var rg = ranges[lvl];
-            if (rg) {
-              var lo = rg[0], hi = rg[1];
-              var st, cls = '';
-              if (optWords < lo) { st = '偏少 ' + (lo - optWords) + ' 词'; cls = 'is-low'; }
-              else if (optWords > hi) { st = '偏多 ' + (optWords - hi) + ' 词'; cls = 'is-high'; }
-              else st = '达标';
-              if (cls) chip.className += ' ' + cls;
-              chip.textContent = '优化版 ' + optWords + ' 词 · ' + st + '（' + lvl + '要求 ' + lo + '–' + hi + ' 词）';
-            } else {
-              chip.textContent = '优化版 ' + optWords + ' 词（级别未确定，未做达标判定）';
-            }
+            var exact = !!ranges[lvl];
+            var rg = ranges[lvl] || ranges['四级'];   // 级别未定 → 按四级区间判定并显式标注
+            var lo = rg[0], hi = rg[1];
+            var st, cls = '';
+            if (optWords < lo) { st = '偏少 ' + (lo - optWords) + ' 词'; cls = 'is-low'; }
+            else if (optWords > hi) { st = '偏多 ' + (optWords - hi) + ' 词'; cls = 'is-high'; }
+            else st = '达标';
+            if (cls) chip.className += ' ' + cls;
+            chip.textContent = '优化版 ' + optWords + ' 词 · ' + st + (exact
+              ? '（' + lvl + '要求 ' + lo + '–' + hi + ' 词）'
+              : '（级别未定，按四级要求 ' + lo + '–' + hi + ' 词）');
             card.appendChild(chip);
           }
         }
@@ -589,9 +598,253 @@
     await runStream({ preset: preset, model: model, userContent: userContent, maxTokens: maxTokens });
   }
 
-  /* 复制模式（完整接线在第三部分） */
-  function onCopyClick() { openCopyPanel(); toast('复制功能将随后接入（正在构建中）'); }
-  function onRenderPaste() { toast('渲染功能将随后接入（正在构建中）'); }
+  /* ---------- 复制模式（完整） ---------- */
+  function buildCopyTextNow() {
+    return prompt.buildCopyText({
+      level: levelArg(), title: state.title, text: state.text, images: state.images.length,
+    });
+  }
+  function showCopyResult(ok) {
+    var btn = $('#btn-copy-text');
+    if (ok) {
+      btn.textContent = '已复制 ✓';
+      toast('已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。');
+    } else {
+      btn.textContent = '复制指令';           // 绝不假成功
+      var preview = $('#copy-prompt-preview');
+      try { preview.focus(); preview.select(); } catch (e) { /* 忽略 */ }
+      toast('自动复制不可用：已选中指令文本，请长按或按 Ctrl+C 复制');
+    }
+  }
+  function copyPromptNow() {
+    var text = $('#copy-prompt-preview').value || buildCopyTextNow();
+    var hasAsync = false;
+    try { hasAsync = !!(navigator.clipboard && navigator.clipboard.writeText); } catch (e) { hasAsync = false; }
+    if (!hasAsync) {
+      // 无异步剪贴板（file://、部分内嵌浏览器）：同步降级路径，结果立即可判定
+      showCopyResult(util.copyTextCompat(text));
+      return;
+    }
+    util.copyText(text).then(showCopyResult);
+  }
+  function onCopyClick() {
+    state.text = $('#essay-text').value;
+    state.title = $('#essay-title').value;
+    if (!state.text.trim() && state.images.length === 0) { toast('请先粘贴作文或上传图片'); return; }
+    $('#copy-prompt-preview').value = buildCopyTextNow();
+    openCopyPanel();
+    copyPromptNow();
+  }
+
+  /* ---------- 粘贴渲染 ---------- */
+  function doPasteRender(text) {
+    var entry = _renderReport(text, { source: 'paste' });
+    var r = store.addEntry(entry);
+    if (!r.saved) toast('本地保存失败（存储空间不足），请导出重要报告');
+    setToolbarEnabled(true);
+    $('#paste-warning').hidden = true;
+    toast('报告已渲染，可导出或存档');
+  }
+  function onRenderPaste() {
+    var text = $('#paste-box').value;
+    state.pasteBox = text;
+    saveDraftSoon();
+    if (!text.trim()) { toast('请先把 AI 的批改结果粘贴进来'); return; }
+    var parse = prompt.extractScoreBlock(text);
+    var split = prompt.splitReport(parse.textWithout);
+    if (split.found === 0 && !parse.scores) {
+      $('#paste-warning').hidden = false;
+      return;
+    }
+    doPasteRender(text);
+  }
+
+  /* ---------- 导出 ---------- */
+  function ensurePrintHeader() {
+    var el = document.querySelector('.print-head');
+    var area = $('#report-area');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'print-head';
+      area.insertBefore(el, area.firstChild);
+    }
+    var e = state.lastEntry || {};
+    el.innerHTML = '<h1>四六级作文 AI 批改报告</h1><p>' +
+      util.escapeHtml(util.formatDate(e.ts || Date.now())) +
+      '　级别：' + util.escapeHtml(e.level || '自动推断') +
+      '　题目：' + util.escapeHtml(e.title || '未提供') +
+      (e.scores ? '　总分：' + e.scores.total + ' / 15' : '') + '</p>';
+  }
+  function onPrint() {
+    if (!state.lastEntry) { toast('还没有可打印的报告'); return; }
+    ensurePrintHeader();
+    try { if (typeof window.print === 'function') window.print(); } catch (e) { /* 忽略 */ }
+  }
+  function onExportMd() {
+    var e = state.lastEntry;
+    if (!e) { toast('还没有可导出的报告'); return; }
+    util.downloadFile(exporter.reportFilename(e).replace(/\.html$/i, '.md'), exporter.toMarkdown(e), 'text/markdown;charset=utf-8');
+  }
+  function onExportHtml() {
+    var e = state.lastEntry;
+    if (!e) { toast('还没有可导出的报告'); return; }
+    util.downloadFile(exporter.reportFilename(e), exporter.toStandaloneHtml(e), 'text/html;charset=utf-8');
+  }
+
+  /* ---------- 历史抽屉 ---------- */
+  function renderHistoryList() {
+    var list = $('#history-list');
+    if (!list) return;
+    list.innerHTML = '';
+    var index = store.loadHistoryIndex();
+    if (!index.length) {
+      var empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = '还没有历史记录。';
+      list.appendChild(empty);
+      return;
+    }
+    index.forEach(function (item) {
+      var row = document.createElement('div');
+      row.className = 'hist-item';
+      var main = document.createElement('div');
+      main.className = 'hist-main';
+      var t = document.createElement('div');
+      t.className = 'hist-title';
+      t.textContent = item.title || '（未命名）';
+      var meta = document.createElement('div');
+      meta.className = 'hist-meta';
+      var bits = [util.formatDate(item.ts), item.level || '自动推断'];
+      if (item.scores && item.scores.total != null) bits.push(item.scores.total + '/15');
+      if (item.status === 'stopped') bits.push('已停止');
+      meta.textContent = bits.join(' · ');
+      main.appendChild(t);
+      main.appendChild(meta);
+      var acts = document.createElement('div');
+      acts.className = 'hist-actions';
+      var loadBtn = document.createElement('button');
+      loadBtn.type = 'button';
+      loadBtn.className = 'hist-load';
+      loadBtn.textContent = '查看';
+      loadBtn.addEventListener('click', function () {
+        var full = store.getEntry(item.id);
+        if (!full) { toast('该记录已不存在'); renderHistoryList(); return; }
+        _renderReport(full.reportMd, { source: 'paste', stored: full });
+        setToolbarEnabled(true);
+        closeDrawers();
+        toast('已载入历史报告');
+      });
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'hist-del';
+      delBtn.textContent = '删除';
+      delBtn.addEventListener('click', function () {
+        store.deleteEntry(item.id);
+        renderHistoryList();
+        toast('已删除该记录');
+      });
+      acts.appendChild(loadBtn);
+      acts.appendChild(delBtn);
+      row.appendChild(main);
+      row.appendChild(acts);
+      list.appendChild(row);
+    });
+  }
+
+  /* ---------- 设置抽屉 ---------- */
+  function populateProviderSelect() {
+    var sel = $('#sel-provider');
+    if (!sel || sel.options.length) return;
+    providers.PROVIDERS.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  }
+  function presetFromSelect() {
+    return providers.byId($('#sel-provider').value) || providers.byId(providers.DEFAULT_PROVIDER_ID);
+  }
+  function updatePresetDate(p) {
+    var el = $('#preset-date');
+    if (el) el.textContent = '预设核验日期：' + p.lastChecked + (p.note ? '（' + p.note + '）' : '');
+  }
+  function fillSettingsForm() {
+    populateProviderSelect();
+    var s = state.settings || {};
+    $('#sel-provider').value = s.providerId || providers.DEFAULT_PROVIDER_ID;
+    $('#inp-key').value = s.apiKey || '';
+    var p = presetFromSelect();
+    $('#inp-model').value = s.model || p.defaultModel;
+    $('#inp-baseurl').value = s.baseURL || p.baseURL || '';
+    updatePresetDate(p);
+  }
+  function onProviderChange() {
+    var p = presetFromSelect();
+    $('#inp-model').value = p.defaultModel;
+    $('#inp-baseurl').value = p.baseURL || '';
+    updatePresetDate(p);
+  }
+  function onSaveSettings() {
+    state.settings = {
+      providerId: $('#sel-provider').value,
+      apiKey: $('#inp-key').value.trim(),
+      model: $('#inp-model').value.trim(),
+      baseURL: $('#inp-baseurl').value.trim(),
+    };
+    store.saveSettings(state.settings);
+    updateModeStrip();
+    updateFirstRun();
+    toast('设置已保存');
+    closeDrawers();
+  }
+  function onToggleKey() {
+    var inp = $('#inp-key');
+    var show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    $('#btn-toggle-key').textContent = show ? '隐藏' : '显示';
+  }
+  function onTestConn() {
+    var p = presetFromSelect();
+    var model = $('#inp-model').value.trim() || p.defaultModel;
+    var baseURL = $('#inp-baseurl').value.trim() || p.baseURL;
+    var key = $('#inp-key').value.trim();
+    if (!key) { toast('请先填写 API Key'); return; }
+    toast('正在测试连接…');
+    api.streamChat({
+      preset: { baseURL: baseURL, contextWindow: 8192, maxOutput: 8 },
+      apiKey: key,
+      model: model,
+      baseURL: baseURL,
+      messages: [{ role: 'user', content: '回复：ok' }],
+      extra: { max_tokens: 8 },
+      onDelta: function () {},
+    }).then(function () {
+      toast('连接成功');
+    }).catch(function (err) {
+      toast(((err && err.message) ? err.message : '连接失败') +
+        '（若报模型不存在，可能是服务商已更新模型名，请到其官方文档复制最新模型名填入）');
+    });
+  }
+  function onClearData() {
+    var ok = true;
+    try {
+      if (typeof window.confirm === 'function' && window.confirm('将清空设置、草稿与全部历史记录，确定吗？') === false) ok = false;
+    } catch (e) { /* 忽略 */ }
+    if (!ok) return;
+    try {
+      localStorage.removeItem('eec.settings.v1');
+      localStorage.removeItem('eec.draft.v1');
+    } catch (e) { /* 忽略 */ }
+    store.clearHistory();
+    state.settings = store.loadSettings();
+    state.images = [];
+    renderThumbs();
+    updateModeStrip();
+    updateWordBadge();
+    toast('已清空全部本地数据');
+    closeDrawers();
+  }
 
   /* ---------- 启动 ---------- */
   function bindEvents() {
@@ -648,6 +901,28 @@
 
     $('#btn-stop').addEventListener('click', function () {
       if (state.streaming) state.streaming.abort.abort();
+    });
+    $('#btn-copy-text').addEventListener('click', copyPromptNow);
+    $('#btn-render-anyway').addEventListener('click', function () {
+      doPasteRender($('#paste-box').value);
+    });
+    $('#btn-print').addEventListener('click', onPrint);
+    $('#btn-export-md').addEventListener('click', onExportMd);
+    $('#btn-export-html').addEventListener('click', onExportHtml);
+    $('#btn-save-settings').addEventListener('click', onSaveSettings);
+    $('#btn-toggle-key').addEventListener('click', onToggleKey);
+    $('#btn-test-conn').addEventListener('click', onTestConn);
+    $('#btn-clear-data').addEventListener('click', onClearData);
+    $('#sel-provider').addEventListener('change', onProviderChange);
+    $('#btn-clear-history').addEventListener('click', function () {
+      var ok = true;
+      try {
+        if (typeof window.confirm === 'function' && window.confirm('确定清空全部历史记录吗？') === false) ok = false;
+      } catch (e) { /* 忽略 */ }
+      if (!ok) return;
+      store.clearHistory();
+      renderHistoryList();
+      toast('历史已清空');
     });
     $('#btn-regrade').addEventListener('click', onGradeClick);
     $('#btn-back-latest').addEventListener('click', function () {

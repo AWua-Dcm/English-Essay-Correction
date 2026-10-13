@@ -71,6 +71,16 @@ test('copyText 降级链：clipboard 失败走 execCommand，两者失败返回 
   mk(false, false); assert.strictEqual(await util.copyText('t'), false);
 });
 
+test('copyTextCompat 同步降级路径（execCommand）', () => {
+  const setGlobal = (key, value) => Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  setGlobal('document', { execCommand: () => true, createElement: () => ({ style: {}, select() {}, setAttribute() {} }), body: { appendChild() {}, removeChild() {} } });
+  assert.strictEqual(util.copyTextCompat('t'), true);
+  setGlobal('document', { execCommand: () => false, createElement: () => ({ style: {}, select() {}, setAttribute() {} }), body: { appendChild() {}, removeChild() {} } });
+  assert.strictEqual(util.copyTextCompat('t'), false);
+  setGlobal('document', { createElement: () => { throw new Error('x'); } });
+  assert.strictEqual(util.copyTextCompat('t'), false);
+});
+
 test('wordBadge 三态与官方区间（含 0 词与纯图片）', () => {
   assert.deepStrictEqual(util.wordBadge({ level: 'cet4', count: 130, imageCount: 0 }),
     { text: '130 词 · 达标', status: 'ok' });

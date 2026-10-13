@@ -113,3 +113,74 @@ test('无 Key 点击开始批改 → 引导到复制模式', async () => {
   assert.ok(!$('#copy-panel').hidden);
   assert.match($('#toast').textContent, /复制批改指令/);
 });
+
+/* ================= Task 12：复制模式 / 导出 / 抽屉 ================= */
+
+test('复制模式全链路：杂乱真实形态依旧渲染（标题变体/列表内引用/无 [DONE]/寒暄）', async () => {
+  const { $, $all, click, type } = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  type($('#essay-text'), 'word '.repeat(130).trim());
+  click($('#btn-copy-prompt'));
+  assert.ok(!$('#copy-panel').hidden);
+  assert.ok($('#copy-prompt-preview').value.includes('===== 批改要求（必须全部遵守）====='));
+  // 模拟从聊天应用粘回的结果（Markdown 退化 + 寒暄）
+  const messy = '好的，以下是批改报告：\n\n### 步骤 1 总分与分项\n总分 12 / 15\n\n' +
+    '### 步骤2 逐条扣分点\n1. 问题类型：语法\n> He go to school everyday.\n\n' +
+    '### 步骤三 修改建议\n建议修改主谓一致。\n\n### 步骤④ 优化版本\n### 优化版本正文\n' + 'word '.repeat(128).trim() + '\n### 主要改动点\n- a\n- b\n\n希望有帮助！';
+  type($('#paste-box'), messy);
+  click($('#btn-render-paste'));
+  assert.strictEqual($all('#report-body .step-card').length, 4, '标题变体未识别');
+  assert.ok($('#report-body').textContent.includes('He go to school everyday.'));
+  assert.match($('#report-body').textContent, /优化版 128 词 · 达标/);
+});
+
+test('粘贴内容缺失标题 → 黄色确认条，确认后仍能渲染', async () => {
+  const { $, $all, click, type } = await loadApp({});
+  type($('#paste-box'), '这是一段没有任何标题的批改文字。');
+  click($('#btn-render-paste'));
+  assert.ok($('#paste-warning').hidden === false);
+  click($('#btn-render-anyway'));
+  assert.ok($('#report-body').textContent.includes('没有任何标题'));
+});
+
+test('剪贴板全失败 → 展开预览选中 + 提示，绝不显示"已复制✓"', async () => {
+  const { $, click, type, window } = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  window.navigator.clipboard = undefined; window.document.execCommand = () => false;
+  type($('#essay-text'), 'x');
+  click($('#btn-copy-prompt')); click($('#btn-copy-text'));
+  assert.ok(!$('#btn-copy-text').textContent.includes('✓'));
+  assert.match($('#toast').textContent, /Ctrl\+C|长按/);
+});
+
+test('历史抽屉：列表、载入、删除', async () => {
+  const seed = [{ id: 'e1', ts: 1000, level: '四级', title: 'T', words: 130, optimizedWords: 132, scores: { total: 12, content: 4, structure: 3, vocab: 2, grammar: 3 }, source: 'auto', status: 'complete', size: 10 }];
+  const { $, $all, click } = await loadApp({ localStorage: {
+    'eec.history.index.v1': JSON.stringify(seed),
+    'eec.history.v1.e1': JSON.stringify({ ...seed[0], essay: 'essay', reportMd: REPORT_OK }),
+  } });
+  click($('#mode-strip'));                                      // 打开设置；历史另有入口
+  click($('#history-open'));
+  assert.strictEqual($all('#history-list .hist-item').length, 1);
+  click($all('#history-list .hist-item .hist-load')[0]);
+  assert.strictEqual($all('#report-body .step-card').length, 4);
+  click($all('#history-list .hist-item .hist-del')[0]);
+  assert.strictEqual($all('#history-list .hist-item').length, 0);
+});
+
+test('设置：服务商切换预设、保存后模式条更新', async () => {
+  const { $, click, fireEvent } = await loadApp({});
+  click($('#mode-strip'));
+  const sel = $('#sel-provider'); sel.value = 'kimi'; fireEvent(sel, 'change');
+  assert.strictEqual($('#inp-model').value, 'kimi-latest');
+  assert.match($('#preset-date').textContent, /2026-10-13/);
+  $('#inp-key').value = 'sk-test';
+  click($('#btn-save-settings'));
+  assert.match($('#mode-strip').textContent, /自动批改 · Kimi/);
+});
+
+test('抽屉无障碍：Esc 关闭并归还焦点', async () => {
+  const { $, click, window } = await loadApp({});
+  click($('#mode-strip'));
+  assert.strictEqual($('#settings-drawer').getAttribute('aria-modal'), 'true');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+  assert.ok($('#settings-drawer').hidden);
+});
