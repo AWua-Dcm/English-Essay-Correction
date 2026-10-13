@@ -1032,6 +1032,13 @@
 
     $('#mode-strip').addEventListener('click', openSettings);
     $('#history-open').addEventListener('click', openHistory);
+    $('#help-open').addEventListener('click', function () {
+      var card = $('#first-run-card');
+      if (!card) return;
+      card.hidden = false;
+      if (card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      announce('已展开使用说明');
+    });
     $('#btn-grade').addEventListener('click', onGradeClick);
     $('#btn-copy-prompt').addEventListener('click', onCopyClick);
     $('#btn-render-paste').addEventListener('click', onRenderPaste);

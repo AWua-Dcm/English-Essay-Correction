@@ -33,12 +33,12 @@ test('打印与缓存策略：@page A4/18mm、资源版本串、hidden 硬约束
   assert.ok(refs.length >= 10);
   for (const el of refs) {
     const u = el.getAttribute('href') || el.getAttribute('src');
-    assert.match(u, /\?v=\d{8}$/, `${u} 缺少 ?v= 版本串`);
+    assert.match(u, /\?v=\d{8}(-\d+)?$/, `${u} 缺少 ?v= 版本串`);
   }
 });
 
 test('DOM 契约元素齐全', () => {
-  const ids = ['mode-strip','history-open','first-run-card','first-run-close','file-banner','wechat-banner',
+  const ids = ['mode-strip','help-open','history-open','first-run-card','first-run-close','file-banner','wechat-banner',
     'level-pills','essay-title','essay-text','word-badge','image-input-camera','image-input-gallery',
     'image-thumbs','sticky-actions','btn-grade','btn-copy-prompt','btn-demo',
     'copy-panel','copy-prompt-preview','btn-copy-text','paste-box','btn-render-paste','paste-warning','btn-render-anyway','copy-tip',

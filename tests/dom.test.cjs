@@ -406,3 +406,21 @@ test('报告工具条：[复制报告全文] 可用', async () => {
   click(btn);
   assert.match($('#toast').textContent, /复制/);
 });
+
+/* ================= 后续迭代：使用说明可再次展开 ================= */
+
+test('使用说明：关闭后可一键再次展开（有 Key 时也可）', async () => {
+  const app = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  assert.ok(!app.$('#first-run-card').hidden, '首次访问应显示引导卡');
+  app.click(app.$('#first-run-close'));
+  assert.ok(app.$('#first-run-card').hidden, '点知道了应隐藏');
+  app.click(app.$('#help-open'));
+  assert.ok(!app.$('#first-run-card').hidden, '点使用说明应再次展开');
+  app.click(app.$('#first-run-close'));
+  assert.ok(app.$('#first-run-card').hidden, '可再次关闭');
+
+  const keyed = await loadApp({ localStorage: { ...KEYED } });
+  assert.ok(keyed.$('#first-run-card').hidden, '有 Key 时启动自动隐藏');
+  keyed.click(keyed.$('#help-open'));
+  assert.ok(!keyed.$('#first-run-card').hidden, '有 Key 时也可手动展开使用说明');
+});
