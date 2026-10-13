@@ -14,11 +14,27 @@ test('相对路径硬约束', () => {
 });
 
 test('脚本加载顺序', () => {
-  const order = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src'));
+  const order = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src').split('?')[0]);
   assert.deepStrictEqual(order, [
     'assets/js/util.js', 'assets/js/render.js', 'assets/js/providers.js', 'assets/js/prompt.js',
     'assets/js/api.js', 'assets/js/store.js', 'assets/js/exporter.js', 'assets/js/demo.js', 'assets/js/app.js',
   ]);
+});
+
+test('打印与缓存策略：@page A4/18mm、资源版本串、hidden 硬约束', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../assets/css/style.css'), 'utf8');
+  assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/, '缺少 [hidden] 硬约束（会被 display:flex 等覆盖）');
+  assert.match(css, /@page\s*\{[^}]*size:\s*A4/, 'style.css 缺少 @page A4');
+  assert.match(css, /@page\s*\{[^}]*margin:\s*18mm/, 'style.css 缺少 18mm 页边距');
+  const exp = fs.readFileSync(path.join(__dirname, '../assets/js/exporter.js'), 'utf8');
+  assert.match(exp, /@page\s*\{[^}]*A4[^}]*18mm/, '导出 HTML 缺少 @page A4/18mm');
+  // 全部资源引用带 ?v=YYYYMMDD 版本串（缓存失效步骤）
+  const refs = [...doc.querySelectorAll('link[href], script[src]')];
+  assert.ok(refs.length >= 10);
+  for (const el of refs) {
+    const u = el.getAttribute('href') || el.getAttribute('src');
+    assert.match(u, /\?v=\d{8}$/, `${u} 缺少 ?v= 版本串`);
+  }
 });
 
 test('DOM 契约元素齐全', () => {

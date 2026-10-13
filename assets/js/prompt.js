@@ -138,20 +138,30 @@
   }
 
   /**
-   * 流式显示用文本：隐藏开头的分数 JSON 围栏（含其后空行）。
-   * 未闭合且全文 <4000 字符 → 返回空串（流式早期整段隐藏）；超 4000 未闭合 → 放弃隐藏，原样返回。
+   * 流式显示用文本：隐藏分数 JSON 围栏（**任意位置**，含 ~~~ 围栏；设计文档 §7.2/§15.2）。
+   * 闭合围栏 → 删除该段；未闭合 → 从围栏处起隐藏（尾部超 4000 字符时放弃隐藏，防整段吞没）。
    */
   function displayText(md) {
     var s = String(md == null ? '' : md);
-    var open = /^\s*```[A-Za-z0-9_-]*[ \t]*\r?\n/.exec(s);
-    if (!open) return s;
-    var afterOpen = s.slice(open[0].length);
-    var closeMatch = /\r?\n[ \t]*```/.exec(afterOpen);
-    var content = !closeMatch ? afterOpen : afterOpen.slice(0, closeMatch.index);
-    if (content.indexOf('"status"') === -1 && content.indexOf('"total"') === -1) return s;
-    if (!closeMatch) return s.length < 4000 ? '' : s;
-    var after = afterOpen.slice(closeMatch.index + closeMatch[0].length);
-    return after.replace(/^\n+/, '');
+    var blocks = findFencedBlocks(s);
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      var isScore = b.lang.toLowerCase() === 'json' ||
+        b.content.indexOf('"status"') !== -1 || b.content.indexOf('"total"') !== -1;
+      if (!isScore) continue;
+      return (s.slice(0, b.start) + s.slice(b.end)).replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '');
+    }
+    var open = /(^|\n)([ \t]*)(```|~~~)[A-Za-z0-9_-]*[ \t]*\r?\n/.exec(s);
+    if (open) {
+      var fenceAt = open.index + (open[1] ? open[1].length : 0);
+      var tail = s.slice(fenceAt);
+      var hasKeys = tail.indexOf('"status"') !== -1 || tail.indexOf('"total"') !== -1;
+      if (hasKeys) {
+        if (tail.length > 4000) return s;
+        return s.slice(0, fenceAt).replace(/\n{3,}/g, '\n\n');
+      }
+    }
+    return s;
   }
 
   /* ===== 分数块解析与报告切分（设计文档 §7.1） ===== */
@@ -234,22 +244,33 @@
     return out;
   }
 
-  /** 无围栏时扫描第一个含 "total"/"status" 的 {...} 对象（花括号配对） */
+  /**
+   * 无围栏时扫描第一个含 "total"/"status" 的 {...} 对象。
+   * 单次线性扫描 + 扫描上限与候选长度上限（防大括号洪泛输入造成的 O(n²) 卡顿）。
+   */
   function findUnfencedObject(s) {
-    var i = s.indexOf('{');
-    while (i !== -1) {
-      var depth = 0, j = i, ok = false;
-      for (; j < s.length; j++) {
-        if (s[j] === '{') depth++;
-        else if (s[j] === '}') { depth--; if (depth === 0) { ok = true; break; } }
-      }
-      if (ok) {
-        var cand = s.slice(i, j + 1);
-        if (cand.indexOf('"status"') !== -1 || cand.indexOf('"total"') !== -1) {
-          return { start: i, end: j + 1, text: cand };
+    var limit = Math.min(s.length, 65536);
+    var depth = 0, start = -1;
+    for (var j = 0; j < limit; j++) {
+      var c = s.charAt(j);
+      if (c === '{') {
+        if (depth === 0) start = j;
+        depth++;
+      } else if (c === '}') {
+        if (depth > 0) {
+          depth--;
+          if (depth === 0 && start !== -1) {
+            var len = j + 1 - start;
+            if (len <= 8192) {
+              var cand = s.slice(start, j + 1);
+              if (cand.indexOf('"status"') !== -1 || cand.indexOf('"total"') !== -1) {
+                return { start: start, end: j + 1, text: cand };
+              }
+            }
+            start = -1;   // 该顶层对象不合格，继续找下一个
+          }
         }
       }
-      i = s.indexOf('{', i + 1);
     }
     return null;
   }

@@ -184,3 +184,225 @@ test('抽屉无障碍：Esc 关闭并归还焦点', async () => {
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
   assert.ok($('#settings-drawer').hidden);
 });
+
+/* ================= 审查修复（Round B）：超时 / 中断 / 假成功 / 门控 / 错误卡 ================= */
+
+test('自动模式：120s 超时看门狗（测试注入短超时）→ 保留前文并标注已超时中断', async () => {
+  const { $, click, stubFetch, flushAll, window } = await loadApp({ localStorage: { ...KEYED } });
+  window.EEC.app._timing.streamTimeoutMs = 60;
+  stubFetch({ chunks: sseChunks(REPORT_OK), chunkDelayMs: 300 });   // 慢流：超时先到
+  $('#essay-text').value = 'word '.repeat(140).trim();
+  click($('#btn-grade'));
+  await flushAll({ ticks: 30, ms: 20 });
+  assert.match($('#report-area').textContent, /已超时中断/);
+  assert.strictEqual(JSON.parse(localStorage.getItem('eec.history.index.v1'))[0].status, 'stopped');
+  assert.strictEqual($('#btn-grade').disabled, false);
+});
+
+test('自动模式：流内错误保留已生成内容并标注（不清空报告区、不丢历史）', async () => {
+  const { $, click, stubFetch, flushAll } = await loadApp({ localStorage: { ...KEYED } });
+  const inside = '## 步骤① 总分与分项\n总分：12 / 15\n内容完整性 4/5、篇章结构 3/4、词汇表达 2/3、语法准确性 3/3\n';
+  const chunks = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: inside }, finish_reason: null }] }) + '\n\n',
+    'data: {"error":{"message":"upstream reset"}}\n\n',
+  ];
+  stubFetch({ chunks });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await flushAll();
+  assert.match($('#parse-note').textContent, /生成中断/);
+  assert.ok($('#parse-note').textContent.includes('upstream reset'), '应附上服务商错误文本');
+  assert.ok($('#report-body').textContent.includes('总分：12 / 15'), '已生成内容被清空');
+  assert.strictEqual($('#report-body').querySelectorAll('.error-card').length, 0);
+  assert.strictEqual(JSON.parse(localStorage.getItem('eec.history.index.v1')).length, 1);
+});
+
+test('自动模式：[DONE] 无 finish_reason 属正常结束（不误判为生成中断）', async () => {
+  const { $, $all, click, stubFetch, flushAll } = await loadApp({ localStorage: { ...KEYED } });
+  const chunks = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: REPORT_OK }, finish_reason: null }] }) + '\n\n',
+    'data: [DONE]\n\n',
+  ];
+  stubFetch({ chunks });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await flushAll();
+  assert.ok(!$('#parse-note').textContent.includes('生成中断'), '误判为中断');
+  assert.strictEqual($all('#report-body .step-card').length, 4);
+});
+
+test('复制面板提示条：失败不显示、成功才显示（绝不假成功）', async () => {
+  const okApp = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  okApp.window.document.execCommand = () => true;
+  okApp.type(okApp.$('#essay-text'), 'x');
+  assert.ok(okApp.$('#copy-tip').hidden, '初始必须隐藏');
+  okApp.click(okApp.$('#btn-copy-prompt'));
+  assert.ok(!okApp.$('#copy-tip').hidden, '复制成功后才显示提醒条');
+
+  const badApp = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  badApp.window.document.execCommand = () => false;
+  badApp.type(badApp.$('#essay-text'), 'x');
+  badApp.click(badApp.$('#btn-copy-prompt'));
+  assert.ok(badApp.$('#copy-tip').hidden, '复制失败时提醒条必须保持隐藏');
+});
+
+test('无视觉模型 + 图片 → 常驻警示卡（含按钮与推荐视觉模型）', async () => {
+  const { $, $all, click, window } = await loadApp({ localStorage: { ...KEYED } });
+  window.EEC.app.state.images.push({ dataUrl: 'data:image/jpeg;base64,AAAA', name: 't.jpg' });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  assert.ok(!$('#vision-warn').hidden);
+  const t = $('#vision-warn').textContent;
+  assert.ok(t.includes('当前模型'), '应点名当前模型');
+  assert.ok(t.includes('kimi-latest') || t.includes('qwen-vl-max') || t.includes('glm-4v-plus'), '应给出具体视觉模型');
+  const btns = $all('#vision-warn button').map(b => b.textContent);
+  assert.ok(btns.some(x => x.includes('打开设置')) && btns.some(x => x.includes('复制模式')));
+});
+
+test('自定义服务商 + 勾选支持视觉 → 图片不再被门控', async () => {
+  const { $, click, stubFetch, flushAll, fireEvent, window } = await loadApp({});
+  click($('#mode-strip'));
+  const sel = $('#sel-provider'); sel.value = 'custom'; fireEvent(sel, 'change');
+  $('#inp-baseurl').value = 'https://gw.example.com/v1';
+  $('#inp-model').value = 'my-vl-model';
+  $('#inp-key').value = 'sk-x';
+  $('#chk-custom-vision').checked = true;
+  click($('#btn-save-settings'));
+  window.EEC.app.state.images.push({ dataUrl: 'data:image/jpeg;base64,AAAA', name: 't.jpg' });
+  $('#essay-text').value = 'x';
+  stubFetch({ status: 401, body: '{"error":{"message":"bad key"}}' });
+  click($('#btn-grade'));
+  await flushAll();
+  // 门控放行：没有警示卡，且请求真正发出（得到 401 错误卡）
+  assert.ok($('#vision-warn').hidden, '不应再被视觉门控拦截');
+  assert.match($('#report-area').textContent, /API Key 无效/);
+});
+
+test('错误卡：402/429 含更换服务商按钮；去充值为可点动作', async () => {
+  const a = await loadApp({ localStorage: { ...KEYED } });
+  a.stubFetch({ status: 402, body: '{"error":{"message":"no balance"}}' });
+  a.$('#essay-text').value = 'x';
+  a.click(a.$('#btn-grade'));
+  await a.flushAll();
+  const btns = a.$all('#report-area button').map(b => b.textContent);
+  assert.ok(btns.some(t => t.includes('去充值')), '402 应有去充值');
+  assert.ok(btns.some(t => t.includes('更换服务商')), '402 应有更换服务商');
+
+  const b = await loadApp({ localStorage: { ...KEYED } });
+  b.stubFetch({ status: 429, body: '{"error":{"message":"rate limited"}}' });
+  b.$('#essay-text').value = 'x';
+  b.click(b.$('#btn-grade'));
+  await b.flushAll();
+  const btns2 = b.$all('#report-area button').map(x => x.textContent);
+  assert.ok(btns2.some(t => t.includes('稍后重试')), '429 应有稍后重试');
+  assert.ok(btns2.some(t => t.includes('更换服务商')), '429 应有更换服务商');
+});
+
+/* ================= 审查修复（Round C）：状态细节 ================= */
+
+test('visibilitychange 立即保存草稿（不等防抖）', async () => {
+  const { $, type, window } = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  type($('#essay-text'), '紧急内容');
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  const d = JSON.parse(localStorage.getItem('eec.draft.v1') || 'null');
+  assert.ok(d && d.text === '紧急内容', 'visibilitychange 未同步保存草稿');
+});
+
+test('空态：无作文无图片时两个主按钮禁用，输入后启用', async () => {
+  const { $, type } = await loadApp({ localStorage: { 'eec.draft.v1': 'null' } });
+  assert.strictEqual($('#btn-grade').disabled, true);
+  assert.strictEqual($('#btn-copy-prompt').disabled, true);
+  type($('#essay-text'), 'x');
+  assert.strictEqual($('#btn-grade').disabled, false);
+  assert.strictEqual($('#btn-copy-prompt').disabled, false);
+  type($('#essay-text'), '');
+  assert.strictEqual($('#btn-grade').disabled, true);
+});
+
+test('status=unreadable → 警示卡含重新提交按钮（点击聚焦正文）', async () => {
+  const { $, click, stubFetch, flushAll, window } = await loadApp({ localStorage: { ...KEYED } });
+  const chunks = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '```json\n{"status":"unreadable","note":"图片无法辨认"}\n```\n图片太模糊。' }, finish_reason: 'stop' }] }) + '\n\n',
+    'data: [DONE]\n\n',
+  ];
+  stubFetch({ chunks });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await flushAll();
+  assert.match($('#report-body').textContent, /图片无法辨认/);
+  const btn = $('#report-body').querySelector('button');
+  assert.ok(btn && btn.textContent.includes('重新提交'), '缺少重新提交按钮');
+  click(btn);
+  assert.strictEqual(window.document.activeElement, $('#essay-text'), '点击后应聚焦正文输入');
+});
+
+test('粘贴确认条：有分数 JSON 但缺标题同样拦截；[重新粘贴] 可回退', async () => {
+  const { $, click, type } = await loadApp({});
+  const jsonOnly = '```json\n{"status":"ok","total":12,"content":4,"structure":3,"vocab":2,"grammar":3}\n```\n这是一段没有标题的批改文字。';
+  type($('#paste-box'), jsonOnly);
+  click($('#btn-render-paste'));
+  assert.strictEqual($('#paste-warning').hidden, false, '含分数 JSON 但缺标题也必须提示');
+  const repaste = $('#btn-repaste');
+  assert.ok(repaste, '缺少重新粘贴按钮');
+  click(repaste);
+  assert.ok($('#paste-warning').hidden);
+});
+
+test('历史行：状态标签与每行导出按钮', async () => {
+  const seed = [
+    { id: 'e1', ts: 1000, level: '四级', title: 'T1', words: 130, optimizedWords: 132, scores: null, source: 'paste', status: 'complete', size: 10 },
+    { id: 'e2', ts: 2000, level: '六级', title: 'T2', words: 160, optimizedWords: 162, scores: null, source: 'auto', status: 'stopped', size: 10 },
+  ];
+  const { $, $all, click } = await loadApp({ localStorage: {
+    'eec.history.index.v1': JSON.stringify(seed),
+    'eec.history.v1.e1': JSON.stringify({ ...seed[0], essay: 'a', reportMd: REPORT_OK }),
+    'eec.history.v1.e2': JSON.stringify({ ...seed[1], essay: 'b', reportMd: REPORT_OK }),
+  } });
+  click($('#history-open'));
+  const metas = $all('#history-list .hist-meta').map(e => e.textContent);
+  assert.ok(metas.some(m => m.includes('粘贴导入')), '缺少粘贴导入标签');
+  assert.ok(metas.some(m => m.includes('已停止')), '缺少已停止标签');
+  assert.strictEqual($all('#history-list .hist-export').length, 2, '每行应有导出按钮');
+});
+
+test('优化版切片缺失 → 未标注回退（不静默丢失）', async () => {
+  const { $, click, type } = await loadApp({});
+  const wrongHeading = '## 步骤① 总分与分项\n总分：12 / 15\n\n## 步骤② 逐条扣分点\n- a\n\n## 步骤③ 修改建议\n- b\n\n## 步骤④ 优化版本\n### 优化版正文\n' + 'word '.repeat(130).trim();
+  type($('#paste-box'), wrongHeading);
+  click($('#btn-render-paste'));
+  const chip = $('#report-body').querySelector('.opt-chip');
+  assert.ok(chip, '缺少回退徽章');
+  assert.match(chip.textContent, /未标注/);
+});
+
+test('打印头包含档次', async () => {
+  const { $, click, stubFetch, flushAll } = await loadApp({ localStorage: { ...KEYED } });
+  stubFetch({ chunks: sseChunks(REPORT_OK) });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await flushAll();
+  click($('#btn-print'));
+  assert.match($('.print-head').textContent, /10-12分档/);
+});
+
+test('微信提示条可关闭并记忆', async () => {
+  const app = await loadApp({ userAgent: 'Mozilla/5.0 MicroMessenger/8.0' });
+  assert.ok(!app.$('#wechat-banner').hidden);
+  app.click(app.$('#wechat-close'));
+  assert.ok(app.$('#wechat-banner').hidden);
+  const again = await loadApp({ userAgent: 'Mozilla/5.0 MicroMessenger/8.0', localStorage: { 'eec.wechat.v1': 'done' } });
+  assert.ok(again.$('#wechat-banner').hidden, '已关闭状态应被记忆');
+});
+
+test('报告工具条：[复制报告全文] 可用', async () => {
+  const { $, click, stubFetch, flushAll, window } = await loadApp({ localStorage: { ...KEYED } });
+  stubFetch({ chunks: sseChunks(REPORT_OK) });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await flushAll();
+  const btn = $('#btn-copy-report');
+  assert.ok(btn, '缺少复制报告全文按钮');
+  window.document.execCommand = () => true;
+  click(btn);
+  assert.match($('#toast').textContent, /复制/);
+});

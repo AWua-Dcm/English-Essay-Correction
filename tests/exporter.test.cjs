@@ -54,3 +54,16 @@ test('scorecardHtml 结构完整（含档次与注记）', () => {
   assert.ok(html.includes('四项得分之和即总分'));
   assert.ok(html.includes('（测试注记）'));
 });
+
+test('scorecardHtml 对分项数值也转义（防历史存储注入）', () => {
+  const html = x.scorecardHtml({ scores: { total: 12, content: '<img src=x onerror=1>', structure: 3, vocab: 2, grammar: 3 }, tier: '10-12分档', annotations: [] });
+  assert.ok(!html.includes('<img'));
+});
+
+test('导出含优化版判定（达标/偏少/偏多 + 区间）', () => {
+  const withChip = { ...entry, optimizedInfo: { words: 190, verdict: '偏多 10 词', rangeText: '六级要求 150–200 词' } };
+  const md = x.toMarkdown(withChip);
+  assert.match(md, /偏多 10 词/);
+  const html = x.toStandaloneHtml(withChip);
+  assert.match(html, /偏多 10 词/);
+});

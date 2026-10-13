@@ -30,6 +30,7 @@
   var _timing = {
     setTimeout: function (fn, ms) { return setTimeout(fn, ms); },
     clearTimeout: function (t) { clearTimeout(t); },
+    streamTimeoutMs: 120000,   // 自动批改超时（测试可注入覆盖）
   };
 
   function $(sel) { return document.querySelector(sel); }
@@ -75,6 +76,17 @@
     el.textContent = wb.text;
     el.className = 'word-badge' + (wb.status !== 'info' ? ' is-' + wb.status : '');
     el.setAttribute('data-status', wb.status);
+    updateActions();   // 输入状态变化 → 同步主按钮可用性（与徽章同源触发点）
+  }
+
+  /** 空态禁用（§5.3 第一行）：无作文且无图片时两个主按钮禁用 */
+  function updateActions() {
+    var ta = $('#essay-text');
+    var empty = !(ta && ta.value.trim()) && state.images.length === 0;
+    var g = $('#btn-grade');
+    var c = $('#btn-copy-prompt');
+    if (g) g.disabled = empty || !!state.streaming;
+    if (c) c.disabled = empty;
   }
 
   function updateModeStrip() {
@@ -89,7 +101,7 @@
   }
 
   /* ---------- 草稿 ---------- */
-  var saveDraftSoon = util.debounce(function () {
+  function saveDraftNow() {
     store.saveDraft({
       level: state.level,
       title: state.title,
@@ -98,7 +110,8 @@
       imageCount: state.images.length,
       ts: Date.now(),
     });
-  }, 500);
+  }
+  var saveDraftSoon = util.debounce(saveDraftNow, 500);
 
   /* ---------- 图片管线 ---------- */
   function renderThumbs() {
@@ -121,6 +134,8 @@
         renderThumbs();
         updateWordBadge();
         saveDraftSoon();
+        var vw = $('#vision-warn');
+        if (vw) vw.hidden = true;
       });
       div.appendChild(im);
       div.appendChild(del);
@@ -247,7 +262,11 @@
     try {
       if (location.protocol === 'file:') $('#file-banner').hidden = false;
     } catch (e) { /* 忽略 */ }
-    if (util.isWeChatOrQQ(navigator.userAgent || '')) $('#wechat-banner').hidden = false;
+    if (util.isWeChatOrQQ(navigator.userAgent || '')) {
+      var dis = false;
+      try { dis = localStorage.getItem('eec.wechat.v1') === 'done'; } catch (e) { dis = false; }
+      $('#wechat-banner').hidden = dis;
+    }
   }
 
   function firstRunDismissed() {
@@ -273,7 +292,7 @@
     if (b) b.disabled = disabled;
   }
   function setToolbarEnabled(enabled) {
-    ['#btn-print', '#btn-export-md', '#btn-export-html'].forEach(function (sel) {
+    ['#btn-print', '#btn-export-md', '#btn-export-html', '#btn-copy-report'].forEach(function (sel) {
       var el = $(sel);
       if (el) el.disabled = !enabled;
     });
@@ -296,7 +315,21 @@
   function _renderReport(fullText, opts) {
     opts = opts || {};
     var parse = prompt.extractScoreBlock(fullText);
-    if (opts.stored && opts.stored.scores) parse.scores = opts.stored.scores;   // 历史载入：用存储分数
+    if (opts.stored && opts.stored.scores) {
+      // 历史载入：先校验存储分数（防被篡改的 localStorage 注入）
+      var st = opts.stored.scores;
+      var smax = { content: 5, structure: 4, vocab: 3, grammar: 3 };
+      var okStored = ['content', 'structure', 'vocab', 'grammar'].every(function (k) {
+        var v = st[k];
+        return typeof v === 'number' && isFinite(v) && v === Math.floor(v) && v >= 0 && v <= smax[k];
+      });
+      if (okStored) {
+        parse.scores = {
+          content: st.content, structure: st.structure, vocab: st.vocab, grammar: st.grammar,
+          total: st.content + st.structure + st.vocab + st.grammar,
+        };
+      }
+    }
     if (opts.stored && opts.stored.level && opts.stored.level !== '自动推断') parse.level = opts.stored.level;
     var display = parse.textWithout;
     $('#report-area').hidden = false;
@@ -311,14 +344,32 @@
     state.reportRendered = false;
 
     var optWords = null;
+    var optInfo = null;
     var noteParts = [];
-    if (opts.aborted) noteParts.push('已停止：内容不完整，可导出已生成部分或重新批改。');
-    else if (opts.interrupted) noteParts.push('生成中断：已保留已生成内容，可重新批改。');
+    if (opts.timeout) noteParts.push('已超时中断，已保留前文。');
+    else if (opts.aborted) noteParts.push('已停止：内容不完整，可导出已生成部分或重新批改。');
+    else if (opts.interrupted) {
+      noteParts.push('生成中断：已保留已生成内容，可重新批改。' + (opts.errorText ? '（' + opts.errorText + '）' : ''));
+    }
 
     if (parse.status === 'unreadable') {
       var ucard = document.createElement('div');
       ucard.className = 'unreadable-card';
-      ucard.textContent = '图片无法辨认：' + (parse.note || '图片模糊或文字无法看清') + '。请补充文字版或重新拍照后重试。';
+      var up = document.createElement('p');
+      up.textContent = '图片无法辨认：' + (parse.note || '图片模糊或文字无法看清') + '。请补充文字版或重新拍照后重试。';
+      ucard.appendChild(up);
+      var rbtn = document.createElement('button');
+      rbtn.type = 'button';
+      rbtn.className = 'btn ghost';
+      rbtn.textContent = '重新提交';
+      rbtn.addEventListener('click', function () {
+        var ta = $('#essay-text');
+        if (ta) {
+          ta.focus();
+          if (ta.scrollIntoView) ta.scrollIntoView({ block: 'center' });
+        }
+      });
+      ucard.appendChild(rbtn);
       body.appendChild(ucard);
       var uentry = buildEntry(parse, display, opts, null);
       note.hidden = false;
@@ -361,11 +412,11 @@
         card.appendChild(content);
         if (step.index === 4) {
           var opt = prompt.extractOptimizedBody(step.body);
+          var chip = document.createElement('span');
+          chip.className = 'opt-chip';
           if (opt) {
             optWords = util.wordCount(opt);
             var lvl = entryLevelFor(parse);
-            var chip = document.createElement('span');
-            chip.className = 'opt-chip';
             var ranges = { '四级': [120, 180], '六级': [150, 200] };
             var exact = !!ranges[lvl];
             var rg = ranges[lvl] || ranges['四级'];   // 级别未定 → 按四级区间判定并显式标注
@@ -378,8 +429,18 @@
             chip.textContent = '优化版 ' + optWords + ' 词 · ' + st + (exact
               ? '（' + lvl + '要求 ' + lo + '–' + hi + ' 词）'
               : '（级别未定，按四级要求 ' + lo + '–' + hi + ' 词）');
-            card.appendChild(chip);
+            optInfo = {
+              words: optWords,
+              verdict: st,
+              rangeText: exact
+                ? (lvl + '要求 ' + lo + '–' + hi + ' 词')
+                : ('级别未定，按四级要求 ' + lo + '–' + hi + ' 词'),
+            };
+          } else {
+            chip.className += ' is-na';
+            chip.textContent = '优化版字数：未标注';
           }
+          card.appendChild(chip);
         }
         body.appendChild(card);
       });
@@ -391,22 +452,23 @@
       note.textContent = noteParts.join(' ');
     }
 
-    var entry = buildEntry(parse, display, opts, optWords);
+    var entry = buildEntry(parse, display, opts, optWords, optInfo);
     state.lastEntry = entry;
     state.reportRendered = true;
     return entry;
   }
 
-  function buildEntry(parse, display, opts, optWords) {
+  function buildEntry(parse, display, opts, optWords, optInfo) {
     return {
       ts: Date.now(),
       level: entryLevelFor(parse),
       title: state.title,
       words: util.wordCount(state.text),
       optimizedWords: optWords,
+      optimizedInfo: optInfo || null,
       scores: parse.scores || null,
       source: opts.source || 'auto',
-      status: opts.aborted ? 'stopped' : 'complete',
+      status: (opts.aborted || opts.timeout || opts.interrupted) ? 'stopped' : 'complete',
       essay: state.text,
       reportMd: display,
     };
@@ -447,10 +509,18 @@
     if (kind === 'auth' || kind === 'params' || kind === 'network') {
       mkBtn('检查 Key / 测试连接', function () { openSettings(); });
     }
-    if (kind === 'balance') mkBtn('去充值', function () { toast('请打开服务商控制台充值后重试'); });
+    if (kind === 'balance') mkBtn('去充值', function () {
+      var p = currentPreset();
+      if (p && p.consoleURL) {
+        try { window.open(p.consoleURL, '_blank', 'noopener'); return; } catch (e) { /* 忽略 */ }
+      }
+      toast('请打开服务商控制台充值后重试');
+    });
     if (kind === 'rate') mkBtn('稍后重试', onGradeClick, 'secondary');
     if (kind === 'server' || kind === 'stream_error') mkBtn('重试', onGradeClick, 'secondary');
-    if (kind === 'server' || kind === 'params') mkBtn('更换服务商', function () { openSettings(); });
+    if (kind === 'server' || kind === 'params' || kind === 'balance' || kind === 'rate') {
+      mkBtn('更换服务商', function () { openSettings(); });
+    }
     mkBtn('改用复制模式', function () { openCopyPanel(); }, 'secondary');
     card.appendChild(actions);
     body.appendChild(card);
@@ -526,6 +596,14 @@
       });
     }
 
+    // 超时看门狗（§6.3：120s；超时与手动停止共享"保留已生成内容"语义）
+    var timeoutMs = _timing.streamTimeoutMs || 120000;
+    var timeoutTimer = _timing.setTimeout(function () {
+      if (state.streaming) {
+        state.streaming.timedOut = true;
+        state.streaming.abort.abort();
+      }
+    }, timeoutMs);
     try {
       var extra = { temperature: 0.6, max_tokens: ctx.maxTokens };
       var res;
@@ -546,17 +624,22 @@
         source: 'auto',
         finishReason: res.finishReason,
         maxTokensDropped: state.streaming.maxTokensDropped,
-        interrupted: !res.finishReason && !res.usedFallbackNonStream,
+        interrupted: !res.endedCleanly && !res.usedFallbackNonStream,
         autoStore: true,
       });
     } catch (e) {
+      var timedOut = !!(state.streaming && state.streaming.timedOut);
       if (e && e.kind === 'aborted') {
-        finishReport(state.streaming.full, { source: 'auto', aborted: true, autoStore: true });
+        finishReport(state.streaming.full, { source: 'auto', aborted: !timedOut, timeout: timedOut, autoStore: true });
+      } else if (state.streaming.full && e && (e.kind === 'stream_error' || e.kind === 'network')) {
+        // 已生成内容优先保留并标注（§5.3 中断语义），不清空报告区
+        finishReport(state.streaming.full, { source: 'auto', interrupted: true, errorText: e.message, autoStore: true });
       } else {
         renderErrorCard(e);
       }
     } finally {
       clearInterval(elapsedTimer);
+      _timing.clearTimeout(timeoutTimer);
       streamStatus.hidden = true;
       state.streaming = null;
       setGradeDisabled(false);
@@ -576,10 +659,14 @@
     }
     var preset = currentPreset();
     var model = currentModel();
-    if (state.images.length > 0 && preset.visionModels.indexOf(model) === -1) {
-      toast('当前模型（' + model + '）不支持图片识别，请更换支持视觉的模型或改用复制模式');
+    var visionOk = preset.visionModels.indexOf(model) !== -1 ||
+      (preset.id === 'custom' && state.settings.customVision === true);
+    if (state.images.length > 0 && !visionOk) {
+      showVisionWarn(preset);
       return;
     }
+    var visionBox = $('#vision-warn');
+    if (visionBox) visionBox.hidden = true;
     var meta = prompt.buildMetaBlock({
       level: levelArg(), title: state.title, text: state.text, images: state.images.length,
     });
@@ -606,15 +693,34 @@
   }
   function showCopyResult(ok) {
     var btn = $('#btn-copy-text');
+    var tip = $('#copy-tip');
     if (ok) {
       btn.textContent = '已复制 ✓';
+      if (tip) {
+        tip.textContent = '已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。';
+        tip.hidden = false;    // 只有复制成功后才显示提醒条（绝不假成功）
+      }
       toast('已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。');
     } else {
-      btn.textContent = '复制指令';           // 绝不假成功
+      btn.textContent = '复制指令';
+      if (tip) tip.hidden = true;
       var preview = $('#copy-prompt-preview');
       try { preview.focus(); preview.select(); } catch (e) { /* 忽略 */ }
       toast('自动复制不可用：已选中指令文本，请长按或按 Ctrl+C 复制');
     }
+  }
+
+  /** 无视觉模型 + 图片：常驻警示卡（含行动按钮与具体视觉模型建议，§5.3） */
+  function showVisionWarn(preset) {
+    var model = currentModel();
+    var suggestion = (preset.visionModels && preset.visionModels[0]) || 'kimi-latest / qwen-vl-max / glm-4v-plus';
+    var text = '当前模型（' + model + '）不支持图片识别，请更换支持视觉的模型（如 ' + suggestion + '）或改用复制模式。';
+    if (preset.id === 'custom') text += '若此自定义接口支持看图，请在设置中勾选「该自定义接口支持图片（视觉）批改」。';
+    var el = $('#vision-warn-text');
+    if (el) el.textContent = text;
+    var box = $('#vision-warn');
+    if (box) box.hidden = false;
+    announce(text);
   }
   function copyPromptNow() {
     var text = $('#copy-prompt-preview').value || buildCopyTextNow();
@@ -652,8 +758,8 @@
     if (!text.trim()) { toast('请先把 AI 的批改结果粘贴进来'); return; }
     var parse = prompt.extractScoreBlock(text);
     var split = prompt.splitReport(parse.textWithout);
-    if (split.found === 0 && !parse.scores) {
-      $('#paste-warning').hidden = false;
+    if (split.found === 0) {
+      $('#paste-warning').hidden = false;   // 缺标题一律先确认（§5.3/§9.2），含已解析出分数的情况
       return;
     }
     doPasteRender(text);
@@ -673,7 +779,10 @@
       util.escapeHtml(util.formatDate(e.ts || Date.now())) +
       '　级别：' + util.escapeHtml(e.level || '自动推断') +
       '　题目：' + util.escapeHtml(e.title || '未提供') +
-      (e.scores ? '　总分：' + e.scores.total + ' / 15' : '') + '</p>';
+      ((e.scores && e.scores.total != null)
+        ? '　总分：' + util.escapeHtml(String(e.scores.total)) + ' / 15（' +
+          util.escapeHtml(prompt.tierFor(Number(e.scores.total) || 0)) + '）'
+        : '') + '</p>';
   }
   function onPrint() {
     if (!state.lastEntry) { toast('还没有可打印的报告'); return; }
@@ -689,6 +798,21 @@
     var e = state.lastEntry;
     if (!e) { toast('还没有可导出的报告'); return; }
     util.downloadFile(exporter.reportFilename(e), exporter.toStandaloneHtml(e), 'text/html;charset=utf-8');
+  }
+  /** 微信等环境下载/打印受限时的兜底：复制报告全文（与复制指令同样的不假成功处理） */
+  function onCopyReport() {
+    var e = state.lastEntry;
+    if (!e) { toast('还没有可复制的报告'); return; }
+    var text = exporter.toMarkdown(e);
+    var hasAsync = false;
+    try { hasAsync = !!(navigator.clipboard && navigator.clipboard.writeText); } catch (ex) { hasAsync = false; }
+    if (!hasAsync) {
+      toast(util.copyTextCompat(text) ? '报告全文已复制' : '自动复制不可用：请改用「导出 .md」保存报告');
+      return;
+    }
+    util.copyText(text).then(function (ok) {
+      toast(ok ? '报告全文已复制' : '自动复制不可用：请改用「导出 .md」保存报告');
+    });
   }
 
   /* ---------- 历史抽屉 ---------- */
@@ -716,7 +840,7 @@
       meta.className = 'hist-meta';
       var bits = [util.formatDate(item.ts), item.level || '自动推断'];
       if (item.scores && item.scores.total != null) bits.push(item.scores.total + '/15');
-      if (item.status === 'stopped') bits.push('已停止');
+      bits.push(item.status === 'stopped' ? '已停止' : (item.source === 'paste' ? '粘贴导入' : '完成'));
       meta.textContent = bits.join(' · ');
       main.appendChild(t);
       main.appendChild(meta);
@@ -743,7 +867,18 @@
         renderHistoryList();
         toast('已删除该记录');
       });
+      var expBtn = document.createElement('button');
+      expBtn.type = 'button';
+      expBtn.className = 'hist-export';
+      expBtn.textContent = '导出';
+      expBtn.addEventListener('click', function () {
+        var full = store.getEntry(item.id);
+        if (!full) { toast('该记录已不存在'); return; }
+        util.downloadFile(exporter.reportFilename(full), exporter.toStandaloneHtml(full), 'text/html;charset=utf-8');
+        toast('已导出该报告（HTML 文件）');
+      });
       acts.appendChild(loadBtn);
+      acts.appendChild(expBtn);
       acts.appendChild(delBtn);
       row.appendChild(main);
       row.appendChild(acts);
@@ -777,6 +912,7 @@
     var p = presetFromSelect();
     $('#inp-model').value = s.model || p.defaultModel;
     $('#inp-baseurl').value = s.baseURL || p.baseURL || '';
+    $('#chk-custom-vision').checked = !!s.customVision;
     updatePresetDate(p);
   }
   function onProviderChange() {
@@ -791,6 +927,7 @@
       apiKey: $('#inp-key').value.trim(),
       model: $('#inp-model').value.trim(),
       baseURL: $('#inp-baseurl').value.trim(),
+      customVision: $('#chk-custom-vision').checked,
     };
     store.saveSettings(state.settings);
     updateModeStrip();
@@ -903,6 +1040,11 @@
       if (state.streaming) state.streaming.abort.abort();
     });
     $('#btn-copy-text').addEventListener('click', copyPromptNow);
+    $('#btn-vision-settings').addEventListener('click', function () { openSettings(); });
+    $('#btn-vision-copy').addEventListener('click', function () {
+      openCopyPanel();
+      toast('已切换到复制模式：复制指令后，把作文照片直接发到 AI 对话里。');
+    });
     $('#btn-render-anyway').addEventListener('click', function () {
       doPasteRender($('#paste-box').value);
     });
@@ -950,6 +1092,20 @@
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') closeDrawers();
     });
+    // 切后台 / 页面被回收前同步落盘（§11.3 + §9.5 往返保护）
+    document.addEventListener('visibilitychange', saveDraftNow);
+    window.addEventListener('pagehide', saveDraftNow);
+
+    $('#wechat-close').addEventListener('click', function () {
+      $('#wechat-banner').hidden = true;
+      try { localStorage.setItem('eec.wechat.v1', 'done'); } catch (e) { /* 忽略 */ }
+    });
+    $('#btn-repaste').addEventListener('click', function () {
+      $('#paste-warning').hidden = true;
+      var pb = $('#paste-box');
+      if (pb) { pb.focus(); pb.select(); }
+    });
+    $('#btn-copy-report').addEventListener('click', onCopyReport);
   }
 
   function boot() {

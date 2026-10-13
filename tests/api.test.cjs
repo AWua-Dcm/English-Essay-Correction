@@ -79,6 +79,31 @@ test('streamChat：成功流（含 finish=length）', async () => {
   assert.deepStrictEqual(fin, { finishReason: 'length' });
 });
 
+test('streamChat：自定义地址必须 https（localhost 例外）', async () => {
+  await assert.rejects(
+    () => api.streamChat({ preset: { baseURL: 'http://evil.example/v1' }, apiKey: 'k', model: 'm', messages: [], onDelta: () => {} }),
+    e => e.kind === 'params' && /https/.test(e.message)
+  );
+  global.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(
+    () => api.streamChat({ preset: { baseURL: 'http://localhost:8000/v1' }, apiKey: 'k', model: 'm', messages: [], onDelta: () => {} }),
+    e => e.kind === 'network'
+  );
+});
+
+test('streamChat：endedCleanly 标记（[DONE] 无 finish_reason 属正常结束）', async () => {
+  const sse = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n';
+  global.fetch = async () => new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  const r = await api.streamChat({ preset: { baseURL: 'https://x/v1' }, apiKey: 'k', model: 'm', messages: [], onDelta: () => {} });
+  assert.strictEqual(r.finishReason, null);
+  assert.strictEqual(r.endedCleanly, true);
+  // 无 [DONE] 且无 finish_reason 直接关流 → endedCleanly false
+  const sse2 = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n';
+  global.fetch = async () => new Response(sse2, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  const r2 = await api.streamChat({ preset: { baseURL: 'https://x/v1' }, apiKey: 'k', model: 'm', messages: [], onDelta: () => {} });
+  assert.strictEqual(r2.endedCleanly, false);
+});
+
 test('streamChat：401 抛 auth；非 SSE 响应走回退解析', async () => {
   global.fetch = async () => new Response('{"error":{"message":"bad key"}}', { status: 401, headers: { 'Content-Type': 'application/json' } });
   await assert.rejects(() => api.streamChat({ preset: { baseURL: 'https://x/v1' }, apiKey: 'k', model: 'm', messages: [], onDelta: () => {} }),

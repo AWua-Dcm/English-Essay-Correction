@@ -38,10 +38,11 @@
     for (var i = 0; i < SCORE_META.length; i++) {
       var m = SCORE_META[i];
       var v = (scores && scores[m.key] != null) ? scores[m.key] : null;
-      var pct = (v == null) ? 0 : Math.max(0, Math.min(100, Math.round(v / m.max * 100)));
+      var num = Number(v);
+      var pct = (v == null || !isFinite(num)) ? 0 : Math.max(0, Math.min(100, Math.round(num / m.max * 100)));
       html += '<div class="sc-row" data-key="' + m.key + '">' +
         '<span class="sc-name">' + m.name + '</span>' +
-        '<span class="sc-points">' + (v == null ? '-' : v) + ' / ' + m.max + '</span>' +
+        '<span class="sc-points">' + (v == null ? '-' : escapeHtml(String(v))) + ' / ' + m.max + '</span>' +
         '<div class="sc-bar"><div class="sc-bar-fill" style="width:' + pct + '%"></div></div>' +
         '</div>';
     }
@@ -74,7 +75,12 @@
     lines.push('- 级别：' + (entry.level || '自动推断'));
     lines.push('- 题目：' + (entry.title || '未提供'));
     lines.push('- 原作文词数：' + (entry.words == null ? '-' : entry.words));
-    if (entry.optimizedWords != null) lines.push('- 优化版词数：' + entry.optimizedWords);
+    if (entry.optimizedInfo && entry.optimizedInfo.words != null) {
+      lines.push('- 优化版：' + entry.optimizedInfo.words + ' 词 · ' + entry.optimizedInfo.verdict +
+        '（' + entry.optimizedInfo.rangeText + '）');
+    } else if (entry.optimizedWords != null) {
+      lines.push('- 优化版词数：' + entry.optimizedWords);
+    }
     if (entry.scores) {
       var tier = tierOf(entry);
       lines.push('- 总分：' + entry.scores.total + ' / 15' + (tier ? '（' + tier + '）' : ''));
@@ -114,6 +120,7 @@
     '.report-body pre{background:#f6f6f6;padding:10px;border-radius:6px;overflow:auto;}',
     '.report-body code{font-family:Consolas,Menlo,monospace;}',
     '.report-foot{margin-top:34px;border-top:1px solid #e3e3e3;padding-top:10px;color:#777;font-size:12px;line-height:1.7;}',
+    '@page{size:A4;margin:18mm;}',
     '@media print{body{color:#000;}.page{max-width:none;padding:0;}}',
   ].join('\n');
 
@@ -136,7 +143,10 @@
       '　题目：' + escapeHtml(title) + '</p>' +
       (entry.scores ? '<p>总分：' + escapeHtml(String(entry.scores.total)) + ' / 15　原作文：' +
         escapeHtml(String(entry.words == null ? '-' : entry.words)) + ' 词' +
-        (entry.optimizedWords != null ? '　优化版：' + escapeHtml(String(entry.optimizedWords)) + ' 词' : '') + '</p>' : '') +
+        (entry.optimizedInfo && entry.optimizedInfo.words != null
+          ? '　优化版：' + escapeHtml(String(entry.optimizedInfo.words)) + ' 词 · ' +
+            escapeHtml(entry.optimizedInfo.verdict) + '（' + escapeHtml(entry.optimizedInfo.rangeText) + '）'
+          : (entry.optimizedWords != null ? '　优化版：' + escapeHtml(String(entry.optimizedWords)) + ' 词' : '')) + '</p>' : '') +
       '</header>\n' +
       card + '\n' +
       '<main class="report-body">\n' + bodyHtml + '\n</main>\n' +

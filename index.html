@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>四六级作文 AI 批改台 · 严格对照官方评分标准</title>
-<link rel="icon" href="assets/img/favicon.svg">
-<link rel="stylesheet" href="assets/css/style.css">
+<link rel="icon" href="assets/img/favicon.svg?v=20261013">
+<link rel="stylesheet" href="assets/css/style.css?v=20261013">
 </head>
 <body>
 
@@ -14,6 +14,7 @@
 </div>
 <div id="wechat-banner" class="banner" hidden>
   <p>微信内复制 / 下载 / 打印可能受限，建议点右上角 ⋯ → 在浏览器打开。</p>
+  <button id="wechat-close" class="banner-close" type="button" aria-label="关闭提示">✕</button>
 </div>
 
 <div class="wrap">
@@ -69,6 +70,14 @@
       <p class="hint">图片识别需要所选模型支持视觉；最多 3 张，会自动压缩。</p>
       <div id="image-thumbs" class="thumbs" aria-label="已选择的图片"></div>
 
+      <div id="vision-warn" class="warn-bar" hidden>
+        <p id="vision-warn-text">当前模型不支持图片识别。</p>
+        <div class="actions">
+          <button id="btn-vision-settings" class="btn ghost" type="button">打开设置</button>
+          <button id="btn-vision-copy" class="btn ghost" type="button">改用复制模式</button>
+        </div>
+      </div>
+
       <div id="sticky-actions" class="sticky-actions">
         <button id="btn-grade" class="btn primary" type="button">开始批改</button>
         <button id="btn-copy-prompt" class="btn secondary" type="button">复制批改指令</button>
@@ -78,7 +87,7 @@
 
     <section id="copy-panel" class="copy-panel" hidden aria-label="复制模式">
       <h2>复制模式（免 Key，全程免费）</h2>
-      <p id="copy-tip" class="tip">已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。</p>
+      <p id="copy-tip" class="tip" hidden>已复制，去 AI 应用粘贴；返回后把整段结果粘回这里。</p>
       <label class="field">
         <span class="field-label">批改指令（可展开查看，只读）</span>
         <textarea id="copy-prompt-preview" rows="5" readonly></textarea>
@@ -90,7 +99,10 @@
       </label>
       <div id="paste-warning" class="warn-bar" hidden>
         <p>未识别到步骤①-④标题，可能粘贴不完整。建议使用聊天应用的「复制」按钮重新复制（保留 Markdown 格式）。</p>
-        <button id="btn-render-anyway" class="btn ghost" type="button">仍然渲染</button>
+        <div class="actions">
+          <button id="btn-render-anyway" class="btn ghost" type="button">仍然渲染</button>
+          <button id="btn-repaste" class="btn ghost" type="button">重新粘贴</button>
+        </div>
       </div>
       <button id="btn-render-paste" class="btn primary" type="button">渲染报告</button>
     </section>
@@ -120,6 +132,7 @@
         <button id="btn-print" class="btn ghost" type="button" disabled>打印 / 存为 PDF</button>
         <button id="btn-export-md" class="btn ghost" type="button" disabled>导出 .md</button>
         <button id="btn-export-html" class="btn ghost" type="button" disabled>导出 .html</button>
+        <button id="btn-copy-report" class="btn ghost" type="button" disabled>复制报告全文</button>
         <button id="btn-regrade" class="btn secondary" type="button">重新批改</button>
       </div>
 
@@ -130,7 +143,7 @@
   <footer class="foot">
     <p>免 Key 也能批改（复制模式），全程免费。图片作文在复制模式下：请把作文照片直接发送到你所用的 AI 对话里（推荐 Kimi / 豆包 / 通义），本页上传的照片只作预览与记录，不会离开你的浏览器。</p>
     <p>批改结果由 AI 生成，仅供学习参考，不代表官方评分。</p>
-    <p>API Key 与作文内容只保存在你的浏览器；批改内容仅发送给你选择的大模型服务。</p>
+    <p>API Key 与作文内容只保存在你的浏览器本地（明文存储）。注意：GitHub Pages 上同账号的其他项目页面与本页同源，技术上可读取本地存储；如担心，用完后可点「清空全部本地数据」。批改内容仅发送给你选择的大模型服务。</p>
   </footer>
 </div>
 
@@ -161,6 +174,10 @@
     <span class="field-label">自定义接口地址（选「自定义」时填写）</span>
     <input id="inp-baseurl" type="text" autocomplete="off" spellcheck="false" placeholder="https://…（OpenAI 兼容）">
   </label>
+  <label class="field check-row">
+    <input id="chk-custom-vision" type="checkbox">
+    <span>该自定义接口支持图片（视觉）批改</span>
+  </label>
   <div class="drawer-actions">
     <button id="btn-test-conn" class="btn ghost" type="button">测试连接</button>
     <button id="btn-save-settings" class="btn primary" type="button">保存</button>
@@ -181,14 +198,14 @@
 <div id="toast" class="toast" hidden></div>
 <div id="live-status" class="visually-hidden" aria-live="polite"></div>
 
-<script src="assets/js/util.js"></script>
-<script src="assets/js/render.js"></script>
-<script src="assets/js/providers.js"></script>
-<script src="assets/js/prompt.js"></script>
-<script src="assets/js/api.js"></script>
-<script src="assets/js/store.js"></script>
-<script src="assets/js/exporter.js"></script>
-<script src="assets/js/demo.js"></script>
-<script src="assets/js/app.js"></script>
+<script src="assets/js/util.js?v=20261013"></script>
+<script src="assets/js/render.js?v=20261013"></script>
+<script src="assets/js/providers.js?v=20261013"></script>
+<script src="assets/js/prompt.js?v=20261013"></script>
+<script src="assets/js/api.js?v=20261013"></script>
+<script src="assets/js/store.js?v=20261013"></script>
+<script src="assets/js/exporter.js?v=20261013"></script>
+<script src="assets/js/demo.js?v=20261013"></script>
+<script src="assets/js/app.js?v=20261013"></script>
 </body>
 </html>

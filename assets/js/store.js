@@ -47,12 +47,13 @@
 
   function loadSettings() {
     var raw = readJson(K_SETTINGS, null);
-    var out = { providerId: 'deepseek', apiKey: '', model: '', baseURL: '' };
+    var out = { providerId: 'deepseek', apiKey: '', model: '', baseURL: '', customVision: false };
     if (raw && typeof raw === 'object') {
       if (typeof raw.providerId === 'string' && raw.providerId) out.providerId = raw.providerId;
       if (typeof raw.apiKey === 'string') out.apiKey = raw.apiKey;
       if (typeof raw.model === 'string') out.model = raw.model;
       if (typeof raw.baseURL === 'string') out.baseURL = raw.baseURL;
+      if (typeof raw.customVision === 'boolean') out.customVision = raw.customVision;
     }
     return out;
   }
@@ -64,6 +65,7 @@
       apiKey: s.apiKey || '',
       model: s.model || '',
       baseURL: s.baseURL || '',
+      customVision: !!s.customVision,
     });
   }
 
@@ -144,6 +146,7 @@
       title: String(entry.title || ''),
       words: entry.words == null ? 0 : entry.words,
       optimizedWords: entry.optimizedWords == null ? null : entry.optimizedWords,
+      optimizedInfo: entry.optimizedInfo || null,
       scores: entry.scores || null,
       source: entry.source || 'auto',
       status: entry.status || 'complete',

@@ -26,6 +26,9 @@
 
 * { box-sizing: border-box; }
 
+/* 硬约束：hidden 属性必须生效（否则会被下方 display:flex 等作者样式覆盖） */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -65,10 +68,19 @@ body {
 
 /* ---------- 横幅与引导 ---------- */
 .banner {
+  position: relative;
   background: #fdf6e9; border: 1px solid #eadfc2; border-radius: var(--radius);
-  padding: 10px 14px; margin: 8px 0; font-size: 14px; color: #6b5a20;
+  padding: 10px 36px 10px 14px; margin: 8px 0; font-size: 14px; color: #6b5a20;
 }
 .banner p { margin: 0; }
+.banner-close {
+  position: absolute; top: 6px; right: 8px;
+  border: none; background: none; color: #6b5a20;
+  font-size: 14px; cursor: pointer; padding: 4px 6px;
+}
+.opt-chip.is-na { background: #f2f4f2; color: var(--mute); border-color: var(--line); }
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.check-row input { width: auto; }
 .onboard {
   background: var(--pine-wash); border: 1px solid #cfe0d6;
   border-radius: var(--radius); padding: 14px 16px; margin: 10px 0 16px;
@@ -366,6 +378,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { border-color
 }
 
 /* ---------- 打印（报告 A4 版式） ---------- */
+@page { size: A4; margin: 18mm; }
 .print-head { display: none; }
 @media print {
   body { background: #fff; }

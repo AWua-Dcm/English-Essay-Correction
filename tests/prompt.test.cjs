@@ -64,6 +64,22 @@ test('displayText 隐藏开头分数围栏', () => {
   assert.ok(prompt.displayText('## 正文\n没有围栏').startsWith('## 正文'));
 });
 
+test('displayText v2：中场出现的分数围栏也被隐藏（任意位置）', () => {
+  const mid = '前言\n\n```json\n{"status":"ok","total":12}\n```\n\n## 步骤① 总分与分项\n正文';
+  const out = prompt.displayText(mid);
+  assert.ok(out.includes('前言'));
+  assert.ok(!out.includes('"total"'), '中场 JSON 泄漏');
+  assert.ok(out.includes('## 步骤①'));
+});
+
+test('findUnfencedObject 线性扫描：大括号洪泛输入不卡顿', () => {
+  const t0 = Date.now();
+  const r = prompt.extractScoreBlock('{'.repeat(30000));
+  const dt = Date.now() - t0;
+  assert.strictEqual(r.parseMode, 'none');
+  assert.ok(dt < 400, `耗时 ${dt}ms（应 <400ms）`);
+});
+
 test('providers 预设完整性', () => {
   assert.ok(providers.PROVIDERS.length >= 7);
   for (const p of providers.PROVIDERS) {

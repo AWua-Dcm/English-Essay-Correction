@@ -141,6 +141,22 @@
     var preset = opts.preset || {};
     var baseURL = String(opts.baseURL || preset.baseURL || '').replace(/\/+$/, '');
     var url = baseURL + '/chat/completions';
+    // 安全：接口地址必须是 https（本机 localhost 例外），防止 API Key 明文传输
+    try {
+      var parsedURL = new URL(url);
+      var host = parsedURL.hostname;
+      var isLocal = (host === 'localhost' || host === '127.0.0.1' || host === '[::1]');
+      if (parsedURL.protocol !== 'https:' && !(parsedURL.protocol === 'http:' && isLocal)) {
+        var secErr = new Error('自定义接口地址必须使用 https://（http 仅限本机 localhost）');
+        secErr.kind = 'params';
+        throw secErr;
+      }
+    } catch (e1) {
+      if (e1 && e1.kind) throw e1;
+      var badErr = new Error('接口地址无效：' + (baseURL || '（空）'));
+      badErr.kind = 'params';
+      throw badErr;
+    }
     var body = Object.assign(
       { model: opts.model, messages: opts.messages || [] },
       opts.extra || {},
@@ -176,20 +192,21 @@
       if (content && opts.onDelta) opts.onDelta(content);
       var fr = ch.finish_reason || null;
       if (opts.onFinish) opts.onFinish({ finishReason: fr });
-      return { finishReason: fr, usedFallbackNonStream: true };
+      return { finishReason: fr, usedFallbackNonStream: true, endedCleanly: true };
     }
     var decoder = createLineDecoder();
     var parser = createSSEParser();
     var reader = res.body.getReader();
     var finishReason = null;
     var done = false;
+    var ended = false;   // 正常终止标记：[DONE] 或 finish_reason 任一出现
     function handle(events) {
       for (var i = 0; i < events.length; i++) {
         var ev = events[i];
         if (ev.type === 'delta') { if (opts.onDelta) opts.onDelta(ev.text); }
-        else if (ev.type === 'finish') { if (!finishReason) finishReason = ev.reason; }
+        else if (ev.type === 'finish') { if (!finishReason) finishReason = ev.reason; ended = true; }
         else if (ev.type === 'error') { var e = new Error(ev.message); e.kind = 'stream_error'; throw e; }
-        else if (ev.type === 'done') { done = true; }
+        else if (ev.type === 'done') { done = true; ended = true; }
       }
     }
     try {
@@ -214,7 +231,7 @@
       throw classifyError({ status: null, error: err });
     }
     if (opts.onFinish) opts.onFinish({ finishReason: finishReason });
-    return { finishReason: finishReason, usedFallbackNonStream: false };
+    return { finishReason: finishReason, usedFallbackNonStream: false, endedCleanly: ended };
   }
 
   var api = {
