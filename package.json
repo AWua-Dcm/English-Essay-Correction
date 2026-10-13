@@ -1,0 +1,8 @@
+{
+  "name": "english-essay-correction",
+  "private": true,
+  "version": "1.0.0",
+  "description": "四六级作文 AI 批改台：零依赖纯静态网页工具",
+  "scripts": { "test": "node --test" },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}

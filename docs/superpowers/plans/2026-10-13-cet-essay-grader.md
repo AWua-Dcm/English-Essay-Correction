@@ -22,7 +22,7 @@
 - 界面文案全部中文；页脚必须含设计文档 §2.3 文案与免责声明。
 - 移动端：`font-size ≥ 16px` 的输入控件、`viewport` meta、含 `env(safe-area-inset-bottom)` 的 sticky 操作条。
 - `file://` 双击可打开（普通 script，无 ES Modules；fetch 受限时的行为见 §5.1.9）。
-- 单一门禁命令：`npm test`（= `node --test tests/`）。
+- 单一门禁命令：`npm test`（= `node --test`，默认递归发现 `tests/*.test.cjs`；Windows 下带目录参数有兼容问题，勿用）。
 
 ## Review Focus（设计文档隐含、测试矩阵最容易漏的 5 类输入/失败模式）
 
