@@ -236,33 +236,27 @@
   }
 
   /**
-   * 依次识别所有已选图片，把文字填进正文框。
-   * 刻意「只填不改」：不自动开始批改，也不做任何拼写纠正——
-   * 识别错误必须由用户过目，否则会被当成学生作文里的错误扣分。
+   * 识别所有已选图片，返回 { text, confidence, grade, advice }。
+   * 只负责"看图得字"；是否填进正文、是否接着批改，由调用方决定。
+   * **绝不做拼写纠正**——批改的核心就是找拼写与语法错误，纠错等于先抹掉要检测的东西。
    */
-  function runOcr() {
-    if (state.ocrBusy) return;
+  function ocrImagesToText(onStatus) {
     var ocr = root.EEC && root.EEC.ocr;
-    if (!state.images.length) { toast('请先添加图片'); return; }
+    var status = onStatus || setOcrStatus;
     if (!ocr || !ocr.isSupported()) {
-      showOcrNote('当前浏览器不支持本地文字识别（缺少 WebAssembly SIMD）。' +
-        '请改用支持图片识别的模型，或把作文粘贴成文字。', true);
-      return;
+      return Promise.reject(new Error(
+        '当前浏览器不支持本地文字识别（缺少 WebAssembly SIMD）'));
     }
-    state.ocrBusy = true;
-    syncOcrRow();
-    var texts = [];
-    var lowest = 100;
-    var grade = 'unknown';
-    setOcrStatus('正在加载识别组件（首次约 6MB，之后走浏览器缓存）…');
-
+    if (!state.images.length) return Promise.reject(new Error('请先添加图片'));
+    var texts = [], lowest = 100, grade = 'unknown';
+    status('正在加载识别组件（首次约 6MB，之后走浏览器缓存）…');
     var chain = Promise.resolve();
     state.images.forEach(function (img, i) {
       chain = chain.then(function () {
-        setOcrStatus('正在识别第 ' + (i + 1) + '/' + state.images.length + ' 张…');
+        status('正在识别第 ' + (i + 1) + '/' + state.images.length + ' 张…');
         return ocr.recognize(img.dataUrl, function (m) {
           if (m && m.status === 'recognizing text' && typeof m.progress === 'number') {
-            setOcrStatus('识别中 ' + Math.round(m.progress * 100) + '%（第 ' + (i + 1) + ' 张）');
+            status('识别中 ' + Math.round(m.progress * 100) + '%（第 ' + (i + 1) + ' 张）');
           }
         }).then(function (r) {
           if (r.text) texts.push(r.text);
@@ -272,28 +266,54 @@
         });
       });
     });
+    return chain.then(function () {
+      return {
+        text: texts.join('\n\n').trim(),
+        confidence: lowest === 100 ? null : lowest,
+        grade: grade,
+        advice: ocr.advice(grade),
+      };
+    });
+  }
 
-    chain.then(function () {
-      var out = texts.join('\n\n').trim();
-      if (!out) {
-        setOcrStatus('');
+  /** 把识别结果并入正文框（只追加，不覆盖用户已输入的内容） */
+  function applyOcrText(out) {
+    var ta = $('#essay-text');
+    if (!ta || !out) return;
+    var existing = ta.value.trim();
+    ta.value = existing ? (existing + '\n\n' + out) : out;
+    state.text = ta.value;
+    // 批改时据此提醒模型：正文来自图片识别，识别误差不是学生的错
+    state.ocrUsed = true;
+    updateWordBadge();   // 内部会调用 updateActions()，同步主按钮与清除按钮可用性
+    saveDraftSoon();
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /** 按钮：识别图片文字。结果只填入正文供核对，**不自动批改**。 */
+  function runOcr() {
+    if (state.ocrBusy) return;
+    var ocr = root.EEC && root.EEC.ocr;
+    // 前置检查放在这里而不是只靠 Promise 拒绝：要让用户看到"该怎么办"，
+    // 而不是一句冷冰冰的"识别失败：…"。
+    if (!state.images.length) { toast('请先添加图片'); return; }
+    if (!ocr || !ocr.isSupported()) {
+      showOcrNote('当前浏览器不支持本地文字识别（缺少 WebAssembly SIMD）。' +
+        '请改用支持图片识别的模型，或把作文粘贴成文字。', true);
+      return;
+    }
+    state.ocrBusy = true;
+    syncOcrRow();
+    ocrImagesToText().then(function (r) {
+      setOcrStatus('');
+      if (!r.text) {
         showOcrNote('没有从图片里识别出文字。请确认照片里的作文清晰可辨；' +
           '如果是手写内容，本地识别很可能读不出来，建议改用支持图片识别的模型。', true);
         return;
       }
-      var ta = $('#essay-text');
-      if (ta) {
-        var existing = ta.value.trim();
-        ta.value = existing ? (existing + '\n\n' + out) : out;
-        state.text = ta.value;
-        updateWordBadge();   // 内部会调用 updateActions()，同步主按钮与清除按钮可用性
-        saveDraftSoon();
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      var conf = lowest === 100 ? null : lowest;
-      setOcrStatus('');
-      showOcrNote('识别置信度 ' + (conf == null ? '未知' : conf + '%') + '。' + ocr.advice(grade),
-        grade !== 'good');
+      applyOcrText(r.text);
+      showOcrNote('识别置信度 ' + (r.confidence == null ? '未知' : r.confidence + '%') + '。' + r.advice,
+        r.grade !== 'good');
       announce('图片文字识别完成，请核对后再批改');
     }).catch(function (err) {
       setOcrStatus('');
@@ -833,17 +853,42 @@
     var model = currentModel();
     var visionOk = preset.visionModels.indexOf(model) !== -1 ||
       (preset.id === 'custom' && state.settings.customVision === true);
+    // 图片路径按"模型有没有识图能力"分流：
+    //   有识图 → 图片直接交给模型（下面走多模态消息）
+    //   没识图 → 用本地 OCR 把图片转成文字，再按纯文字批改（不再直接拦住）
+    var sendImages = state.images.length > 0 && visionOk;
     if (state.images.length > 0 && !visionOk) {
-      showVisionWarn(preset);
-      return;
+      var ocrMod = root.EEC && root.EEC.ocr;
+      if (!ocrMod || !ocrMod.isSupported()) {
+        showVisionWarn(preset);   // 本地识别也不可用，才回到"换模型"的提示
+        return;
+      }
+      var vw = $('#vision-warn');
+      if (vw) vw.hidden = true;
+      toast('该模型不支持图片识别，改用本地识别把图片转成文字…');
+      try {
+        var ocrRes = await ocrImagesToText(function (m) { announce(String(m)); });
+        if (!ocrRes.text) { showVisionWarn(preset); return; }
+        applyOcrText(ocrRes.text);
+        showOcrNote('正文由本地识别得到，置信度 ' +
+          (ocrRes.confidence == null ? '未知' : ocrRes.confidence + '%') + '。' + ocrRes.advice,
+          ocrRes.grade !== 'good');
+      } catch (e) {
+        showVisionWarn(preset);
+        return;
+      }
+      if (!state.text.trim()) { showVisionWarn(preset); return; }
     }
     var visionBox = $('#vision-warn');
     if (visionBox) visionBox.hidden = true;
     var meta = prompt.buildMetaBlock({
-      level: levelArg(), title: state.title, text: state.text, images: state.images.length,
+      level: levelArg(), title: state.title, text: state.text,
+      images: sendImages ? state.images.length : 0,
+      // 文字来自图片识别时，必须告诉模型别把识别误差当成学生的错误
+      fromOcr: !!state.ocrUsed && !sendImages,
     });
     var userContent = meta;
-    if (state.images.length) {
+    if (sendImages) {
       userContent = [{ type: 'text', text: meta }].concat(state.images.map(function (im) {
         return { type: 'image_url', image_url: { url: im.dataUrl } };
       }));
@@ -956,6 +1001,20 @@
     var empties = prompt.emptyStepIndexes(split);
     if (empties.length === split.steps.length) {
       showPasteWarning('只粘贴到了步骤标题，没有正文内容。请确认复制的是 AI 的完整回复。');
+      return;
+    }
+
+    // 3) 只识别到部分步骤：明确说出缺哪一步。
+    //    "可能不完整"没有可操作性，指出缺 ③④ 才知道该怎么办。
+    if (split.found < 4) {
+      var have = split.steps.map(function (s) { return '①②③④'.charAt(s.index - 1); }).join('、');
+      var miss = [1, 2, 3, 4].filter(function (i) {
+        return !split.steps.some(function (s) { return s.index === i; });
+      }).map(function (i) { return '①②③④'.charAt(i - 1); }).join('、');
+      showPasteWarning('只识别到步骤' + have + '，缺少步骤' + miss +
+        '。可能是 AI 没有按格式输出，或粘贴时被截断。' +
+        '建议回到 AI 对话重新复制**整段回复**；' +
+        '若 AI 确实没写这一步，点「仍然渲染」可先看已有部分。');
       return;
     }
 

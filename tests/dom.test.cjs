@@ -246,8 +246,10 @@ test('复制面板提示条：失败不显示、成功才显示（绝不假成�
   assert.ok(badApp.$('#copy-tip').hidden, '复制失败时提醒条必须保持隐藏');
 });
 
-test('无视觉模型 + 图片 → 常驻警示卡（含按钮与推荐视觉模型）', async () => {
+test('无视觉模型 + 图片 + 本地识别也不可用 → 常驻警示卡（含按钮与推荐视觉模型）', async () => {
   const { $, $all, click, window } = await loadApp({ localStorage: { ...KEYED } });
+  // 现在无识图能力时优先走本地 OCR；只有连 OCR 也不可用，才回到"换模型"的提示
+  window.EEC.ocr.isSupported = () => false;
   window.EEC.app.state.images.push({ dataUrl: 'data:image/jpeg;base64,AAAA', name: 't.jpg' });
   $('#essay-text').value = 'x';
   click($('#btn-grade'));
@@ -567,4 +569,54 @@ test('预检面板：级别未定时不给出达标结论', async () => {
   const t = $('#precheck').textContent;
   assert.match(t, /级别未定/, '自动级别下应标注级别未定');
   assert.ok(!/达标/.test(t), '级别未定不应下达标结论');
+});
+
+test('无视觉模型 + 图片 + 本地识别可用 → 不弹换模型警示卡，走本地识别', async () => {
+  const { $, click, window } = await loadApp({ localStorage: { ...KEYED } });
+  window.EEC.ocr.isSupported = () => true;
+  // 桩掉识别：断言的是"分流到了 OCR 这条路"，不是识别本身
+  let asked = false;
+  window.EEC.ocr.recognize = () => { asked = true; return Promise.resolve({ text: '', confidence: 90, grade: 'good', advice: '' }); };
+  window.EEC.app.state.images.push({ dataUrl: 'data:image/jpeg;base64,AAAA', name: 't.jpg' });
+  $('#essay-text').value = 'x';
+  click($('#btn-grade'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(asked, '应调用本地识别，而不是直接拦住');
+  assert.match($('#toast').textContent, /本地识别|转成文字/, '应告知正在改用本地识别');
+});
+
+test('OCR 文本注入批改指令时声明来源，避免识别误差被当成学生错误', async () => {
+  const { window } = await loadApp({});
+  const p = window.EEC.prompt;
+  const meta = p.buildMetaBlock({ level: '四级', title: 'T', text: 'Some essay text here.', images: 0, fromOcr: true });
+  assert.ok(meta.includes('【文字来源】'), '缺少来源声明');
+  assert.ok(meta.includes('本地图片识别'), '未说明来自 OCR');
+  assert.ok(meta.includes('疑似识别误差'), '未要求区分识别误差');
+  // 非 OCR 来源不得出现该声明
+  const plain = p.buildMetaBlock({ level: '四级', title: 'T', text: 'Some essay text here.', images: 0 });
+  assert.ok(!plain.includes('【文字来源】'), '普通文本不应带 OCR 声明');
+});
+
+/* ---------- 复制模式：缺步骤时的可操作提示 ---------- */
+
+test('报告缺少步骤 → 明确说出缺哪一步，而不是笼统说不完整', async () => {
+  const { $, click, type } = await loadApp({});
+  const partial = '```json\n{"status":"ok","level":"四级","total":12,"tier":"10-12分档","content":4,"structure":3,"vocab":2,"grammar":3}\n```\n' +
+    '## 步骤① 总分与分项\n内容完整性 4/5。\n\n## 步骤② 逐条扣分点\n1. 主谓不一致\n> Online learning have many advantages.';
+  type($('#paste-box'), partial);
+  click($('#btn-render-paste'));
+  const warn = $('#paste-warning-text').textContent;
+  assert.ok(!$('#paste-warning').hidden, '应给出提示');
+  assert.match(warn, /缺少步骤③、④/, '应点名缺哪几步');
+  assert.match(warn, /仍然渲染/, '应给出继续的出口');
+});
+
+test('缺步骤时仍可点「仍然渲染」查看已有部分', async () => {
+  const { $, $all, click, type } = await loadApp({});
+  const partial = '## 步骤① 总分与分项\n内容完整性 4/5。\n\n## 步骤② 逐条扣分点\n1. 主谓不一致';
+  type($('#paste-box'), partial);
+  click($('#btn-render-paste'));
+  assert.ok(!$('#paste-warning').hidden);
+  click($('#btn-render-anyway'));
+  assert.strictEqual($all('.step-card').length, 2, '已有的两个步骤应能渲染出来');
 });

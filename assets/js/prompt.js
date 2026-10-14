@@ -127,8 +127,28 @@
 2. 不得因篇幅长、字迹工整、观点积极而加分。
 3. 严禁默认给出 11-13 分。给分落在 10-13 时，必须说明它为什么不是相邻档，差在哪一条描述上。`;
 
+  /* ===== 附录 D：输出前自检（新增，不改动附录 A / B 的措辞） =====
+   *
+   * 复制模式最容易出的事不是"批得不好"，而是**格式不对导致渲染不出来**：
+   * 外部 AI 常忘了写 JSON 块、标题符号不一致、或用表格把步骤吃掉。
+   * 这里把渲染器真正依赖的几条硬要求，变成模型发送前的逐条自检。 */
+  var FORMAT_GUARD = `【输出前自检（逐条确认，任一条不满足都必须改正后再发送）】
+1. 回复的第一段是不是一个 \`\`\`json 代码块？块内必须是**合法 JSON**：键与字符串用双引号、无注释、无尾逗号。
+2. JSON 中 content、structure、vocab、grammar 四项之和是否**正好等于** total？
+3. 是否**有且只有**下面四个**二级标题（必须以 ## 开头）**，且标题文字逐字一致（包含 ①②③④ 符号）：
+   步骤① 总分与分项
+   步骤② 逐条扣分点
+   步骤③ 修改建议
+   步骤④ 优化版本
+   （此处故意不写 ## 号，避免与本指令自身的排版混淆；你输出时必须带 ##）
+4. 步骤④ 内是否**有且只有**两个**三级标题**（必须以 ### 开头）：优化版本正文 与 主要改动点？
+5. 全文有没有出现 Markdown 表格（形如 |---|---|）？有就改成普通列表——表格无法渲染。
+6. 除第 1 条那一个 JSON 代码块外，还有没有别的代码块？有就删掉。
+7. 有没有输出你的思考过程、分析过程或"好的，我来批改"之类的开场白？有就删掉。
+8. 每个步骤下面是否都有实际正文？**只有标题没有正文是不可接受的**。`;
+
   function buildSystemPrompt() {
-    return TEMPLATE + '\n\n' + PROTOCOL + '\n\n' + RUBRIC;
+    return TEMPLATE + '\n\n' + PROTOCOL + '\n\n' + RUBRIC + '\n\n' + FORMAT_GUARD;
   }
 
   /** 元信息行（三态：级别直接给出 / 自动推断 / 纯图片），设计文档 §6.1 */
@@ -152,7 +172,16 @@
     } else {
       countLine = n + ' 词（级别未提供；请按你推断的级别对照达标：四级 120–180 词，六级 150–200 词）';
     }
-    return '【考试级别】' + levelLine + '\n【作文题目】' + titleLine + '\n【网页统计词数】' + countLine;
+    var out = '【考试级别】' + levelLine + '\n【作文题目】' + titleLine + '\n【网页统计词数】' + countLine;
+    // 正文来自本地图片识别时必须声明：否则模型会把识别误差当成学生的拼写/语法错误扣分，
+    // 那是最伤学生的一种错判。
+    if (opts.fromOcr) {
+      out += '\n【文字来源】本正文由**本地图片识别（OCR）**得到，可能有个别字词识别不准。' +
+        '批改时请只针对你能确认为学生写作问题的内容扣分；' +
+        '对疑似识别错误的内容（例如明显不合语境的怪词、明显的字符误认），' +
+        '不要当作学生的拼写或语法错误，必要时在步骤②中注明"疑似识别误差"并请学生核对。';
+    }
+    return out;
   }
 
   /** 学生作文段（mode: 'api' = 剧本态消息里附图占位；'copy' = 复制模式提示用户在对话中附照片） */
@@ -205,7 +234,7 @@
   /** 复制模式的完整单条文本（设计文档 §9.1） */
   function buildCopyText(opts) {
     return '请你严格按照以下要求，批改下面这篇大学英语四六级作文。请先完整阅读全部要求，再一次性输出完整报告。\n\n' +
-      '===== 批改要求（必须全部遵守）=====\n' + TEMPLATE + '\n\n' + PROTOCOL + '\n\n' + RUBRIC + '\n\n' +
+      '===== 批改要求（必须全部遵守）=====\n' + TEMPLATE + '\n\n' + PROTOCOL + '\n\n' + RUBRIC + '\n\n' + FORMAT_GUARD + '\n\n' +
       '===== 作文信息 =====\n' + metaLines(opts) + '\n\n' +
       (precheckBlock(opts) ? precheckBlock(opts) + '\n\n' : '') +
       '===== 学生作文 =====\n' + essayBlock(opts, 'copy');
@@ -471,6 +500,7 @@
     TEMPLATE: TEMPLATE,
     PROTOCOL: PROTOCOL,
     RUBRIC: RUBRIC,
+    FORMAT_GUARD: FORMAT_GUARD,
     buildSystemPrompt: buildSystemPrompt,
     looksLikeInstruction: looksLikeInstruction,
     emptyStepIndexes: emptyStepIndexes,

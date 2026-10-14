@@ -29,11 +29,33 @@ test('组装后的提示词不含仓库管理语言（防脚手架泄漏）', ()
   }
 });
 
-test('buildSystemPrompt = TEMPLATE + PROTOCOL + RUBRIC', () => {
+test('buildSystemPrompt = TEMPLATE + PROTOCOL + RUBRIC + FORMAT_GUARD', () => {
   assert.strictEqual(
     prompt.buildSystemPrompt(),
-    prompt.TEMPLATE + '\n\n' + prompt.PROTOCOL + '\n\n' + prompt.RUBRIC
+    prompt.TEMPLATE + '\n\n' + prompt.PROTOCOL + '\n\n' + prompt.RUBRIC + '\n\n' + prompt.FORMAT_GUARD
   );
+});
+
+test('输出前自检不得制造额外可被渲染器识别的步骤标题', () => {
+  // 渲染器的标题正则是 ^\s*#{2,4}\s*步骤，连缩进的也匹配。
+  // 自检里若照抄带 ## 的标题示例，指令就会多出四个"假标题"，
+  // 使"粘贴指令当报告"的误判更难识别。因此自检里必须不写 ## 号。
+  const guard = prompt.FORMAT_GUARD;
+  const heads = guard.match(/^\s*#{2,4}\s*步骤/gm) || [];
+  assert.strictEqual(heads.length, 0, '自检里出现了带 ## 的步骤标题示例');
+  assert.ok(guard.includes('步骤① 总分与分项'), '自检应仍给出标题文字');
+  // 指令整体只应有 PROTOCOL 自带的那四个标题（逐字正本，不得改动）
+  const copy = prompt.buildCopyText({ level: '四级', title: 'T', text: 'x', images: 0 });
+  const all = copy.match(/^\s*#{2,4}\s*步骤\s*([①②③④1-4一-四])/gm) || [];
+  assert.strictEqual(all.length, 4, `指令里应只有 PROTOCOL 的 4 个标题，实际 ${all.length} 个`);
+});
+
+test('输出前自检覆盖渲染器真正依赖的格式要求', () => {
+  const g = prompt.FORMAT_GUARD;
+  for (const s of ['合法 JSON', '双引号', '正好等于', '四个**二级标题', '三级标题',
+    'Markdown 表格', '思考过程', '只有标题没有正文']) {
+    assert.ok(g.includes(s), `自检缺少渲染依赖项: ${s}`);
+  }
 });
 
 test('RUBRIC v3 采用官方五档对照法', () => {
